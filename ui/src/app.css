@@ -1,0 +1,69 @@
+:root {
+  --font: "Segoe UI", Arial, sans-serif;
+  --ink: #1e1e1e;
+  --muted: #5f5f5f;
+  --panel: rgba(255, 255, 255, 0.87);
+  --panel-solid: #ffffff;
+  --radius: 10px;
+  --margin: 14px;
+  --blue: #1e64c8;
+  --green: #3c8232;
+  --orange: #e66e14;
+  --purple: #7846aa;
+  --red: #c8281e;
+  --track: #e6e6e6;
+  --line: #d8d8d4;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+button, select, input {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+button {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+button:hover { border-color: #b8b8b2; }
+button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+button.danger { background: var(--red); color: #fff; border-color: var(--red); }
+button.active { border-color: var(--orange); color: var(--orange); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+select, input[type="number"], input[type="text"] {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #fff;
+}
+
+.panel {
+  position: absolute;
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.muted { color: var(--muted); }
+.title { font-size: 20px; font-weight: 700; }
+.small { font-size: 12px; }
+.tiny { font-size: 11px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.grow { flex: 1; }

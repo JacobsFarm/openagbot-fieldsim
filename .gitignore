@@ -1,0 +1,26 @@
+# Werelden van een echte plek bevatten de eigen locatie (net als ritlogs): nooit committen.
+worlds/*
+!worlds/example/
+
+# Ritlogs met echte GPS-posities
+rit_*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Gegenereerd
+runtime/
+build/
+dist/
+ui/node_modules/
+openagbot_fieldsim/static/
+assets/**/*.glb
+!openagbot_fieldsim/implements/assets/**/*.glb
+settings.json
+
+# Lokaal
+.claude/
+start_simworld.bat
