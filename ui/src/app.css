@@ -1,19 +1,30 @@
+/* HUD van de sim: donker glas over het 3D-beeld, één accentkleur, smalle koppen (Barlow Condensed). */
 :root {
-  --font: "Segoe UI", Arial, sans-serif;
-  --ink: #1e1e1e;
-  --muted: #5f5f5f;
-  --panel: rgba(255, 255, 255, 0.87);
-  --panel-solid: #ffffff;
-  --radius: 10px;
-  --margin: 14px;
-  --blue: #1e64c8;
-  --green: #3c8232;
-  --orange: #e66e14;
-  --purple: #7846aa;
-  --red: #c8281e;
-  --track: #e6e6e6;
-  --line: #d8d8d4;
-  color-scheme: light;
+  --font: "Barlow", "Segoe UI", Arial, sans-serif;
+  --display: "Barlow Condensed", "Bahnschrift", "Segoe UI", sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+  --ink: #e9f0f2;
+  --muted: #8fa1aa;
+  --faint: #5f717a;
+  --panel: rgba(12, 18, 22, 0.80);
+  --panel-solid: #10181d;
+  --well: rgba(0, 0, 0, 0.32);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.2);
+  --accent: #b9e34a;
+  --accent-ink: #10180a;
+  --accent-soft: rgba(185, 227, 74, 0.13);
+  --amber: #ffb23e;
+  --red: #ff5a4d;
+  --blue: #4fb3ff;
+  --green: #7ddc3c;
+  --orange: #ffb23e;
+  --purple: #b58cff;
+  --track: rgba(255, 255, 255, 0.1);
+  --radius: 8px;
+  --margin: 16px;
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -22,48 +33,92 @@ html, body, #app {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #ffffff;
+  background: #0b1114;
   color: var(--ink);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
 }
 
-button, select, input {
+button, select, input, textarea {
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--ink);
 }
 
 button {
-  background: #ffffff;
+  min-height: 30px;
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 5px 10px;
+  border-radius: 4px;
+  padding: 4px 11px;
   cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
 }
-button:hover { border-color: #b8b8b2; }
-button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
-button.danger { background: var(--red); color: #fff; border-color: var(--red); }
-button.active { border-color: var(--orange); color: var(--orange); }
-button:disabled { opacity: 0.5; cursor: default; }
+button:hover { background: rgba(255, 255, 255, 0.13); border-color: var(--line-strong); }
+button:active { transform: translateY(1px); }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.primary:hover { background: #cbf060; }
+button.danger { background: rgba(255, 90, 77, 0.16); color: #ffb9b2; border-color: rgba(255, 90, 77, 0.55); }
+button.danger:hover { background: rgba(255, 90, 77, 0.3); }
+button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+button:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
-select, input[type="number"], input[type="text"] {
+select, input[type="number"], input[type="text"], textarea {
+  min-height: 30px;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 4px 6px;
-  background: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: var(--well);
+  user-select: text;
 }
+select option { background: var(--panel-solid); color: var(--ink); }
+input[type="range"] { accent-color: var(--accent); }
+input[type="file"] { font-size: 12px; color: var(--muted); }
+a { color: var(--accent); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
+::-webkit-scrollbar-track { background: transparent; }
 
 .panel {
   position: absolute;
   background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 14px;
+  padding: 12px 14px;
+  backdrop-filter: blur(14px) saturate(1.25);
+  box-shadow: var(--shadow);
 }
 
+/* Koppen in de panelen (de componenten zetten alleen de marge) */
+.sec {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600 !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.sec .muted, .sec .small { letter-spacing: 0.02em; text-transform: none; font-family: var(--font); font-weight: 400; }
+
 .muted { color: var(--muted); }
-.title { font-size: 20px; font-weight: 700; }
-.small { font-size: 12px; }
-.tiny { font-size: 11px; }
+.title { font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; }
+.small { font-size: 12.5px; }
+.tiny { font-size: 11.5px; }
 .row { display: flex; gap: 8px; align-items: center; }
 .grow { flex: 1; }
+.num { font-variant-numeric: tabular-nums; }
+label { color: var(--muted); }
+pre { font-family: var(--mono); background: var(--well) !important; border: 1px solid var(--line); color: #cfd9dd; user-select: text; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

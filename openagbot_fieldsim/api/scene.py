@@ -23,7 +23,8 @@ def scene(world, terrain, params) -> dict:
                     "area_ha": round(polygon_area(f.xy) / 1e4, 2), "center": _r([centroid(f.xy)])[0]}
                    for f in world.fields],
         "surfaces": [{"kind": s.kind, "name": s.name, "poly": _r(s.xy), "level": s.level_m} for s in world.surfaces],
-        "ditches": [{"line": _r(d.xy), "width": d.width_m, "depth": d.depth_m, "level": round(lv, 3)}
+        "ditches": [{"line": _r(d.xy), "width": d.width_m, "depth": d.depth_m, "water_depth": d.water_depth_m,
+                     "level": round(lv, 3)}
                     for d, lv in zip(world.ditches, levels)],
         "buildings": [{"id": b.id, "name": b.name, "kind": b.kind, "poly": _r(b.xy), "height": b.height_m,
                        "base": round(float(min(terrain.height(x, y) for x, y in b.xy)), 3),

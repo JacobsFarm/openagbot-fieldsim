@@ -1,6 +1,7 @@
 // De Bruut als eenvoudig model in de kleuren van build_agbot.py, op de maten uit de robotconfig.
 // Oorsprong = midden achteras op de grond (het regelpunt van OpenAgbot); lokaal x = rechts, y = vooruit, z = op.
 // Later te vervangen door de .glb uit FreeCAD (export_glb.py); de API (setPose) blijft gelijk.
+// Materiaal: rubber mat, staal en zink glanzend (spiegelen de lucht), hout en poedercoat daartussenin.
 import * as THREE from 'three';
 import { color } from '../../theme.js';
 import { box, cylinderX, cylinderZ, mat } from './materials.js';
@@ -14,16 +15,17 @@ const Z_LOWER_BEAM = 0.619;         // onderkant onderbalk
 function wheel(diameter) {
   const r = diameter / 2;
   const spin = new THREE.Group();
-  spin.add(cylinderX(r, 0.10, color.tire, { segments: 40, threshold: 50 }));
-  spin.add(cylinderX(r * 0.47, 0.106, color.rim, { segments: 32, threshold: 50 }));
-  spin.add(cylinderX(r * 0.37, 0.14, color.hub, { segments: 32, threshold: 50 }));
+  spin.add(cylinderX(r, 0.10, color.tire, { segments: 40, threshold: 50, rough: 0.94 }));
+  spin.add(cylinderX(r * 0.47, 0.106, color.rim, { segments: 32, threshold: 50, rough: 0.4, metal: 0.7 }));
+  spin.add(cylinderX(r * 0.37, 0.14, color.hub, { segments: 32, threshold: 50, rough: 0.35, metal: 0.8 }));
   // Noppen (tractorprofiel), zodat je het wiel ziet draaien
   const lugG = new THREE.BoxGeometry(0.1, 0.035, 0.03);
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2;
-    const lug = new THREE.Mesh(lugG, mat(color.tire));
+    const lug = new THREE.Mesh(lugG, mat(color.tire, { rough: 0.94 }));
     lug.position.set(0, Math.sin(a) * (r - 0.014), Math.cos(a) * (r - 0.014));   // buitenkant nop = r
     lug.rotation.x = -a;
+    lug.castShadow = true;
     spin.add(lug);
   }
   spin.position.z = r;
@@ -39,27 +41,27 @@ function wheelUnit(diameter, steered) {
   const r = diameter / 2;
   const top = Z_PLATE;
   for (const sx of [-1, 1]) {
-    const plate = box(0.004, 0.24, top - r + 0.06, color.fork);
+    const plate = box(0.004, 0.24, top - r + 0.06, color.fork, { rough: 0.45, metal: 0.7 });
     plate.position.set(sx * 0.094, 0, r - 0.06);
     steer.add(plate);
   }
-  const tp = box(0.24, 0.24, 0.004, color.top_plate);
+  const tp = box(0.24, 0.24, 0.004, color.top_plate, { rough: 0.5, metal: 0.5 });
   tp.position.z = top;
   steer.add(tp);
-  const bearing = box(0.09, 0.09, 0.04, color.bearing);
+  const bearing = box(0.09, 0.09, 0.04, color.bearing, { rough: 0.45, metal: 0.3 });
   bearing.position.z = top + 0.004;
   unit.add(bearing);
   if (steered) {
-    const motor = box(0.086, 0.086, 0.26, color.stepper);
+    const motor = box(0.086, 0.086, 0.26, color.stepper, { rough: 0.5, metal: 0.4 });
     motor.position.z = top + 0.17;
     unit.add(motor);
     for (const [dx, dy] of [[-0.06, -0.06], [0.06, -0.06], [-0.06, 0.06], [0.06, 0.06]]) {
-      const rod = cylinderZ(0.005, 0.16, color.zinc, { segments: 8, edges: false });
+      const rod = cylinderZ(0.005, 0.16, color.zinc, { segments: 8, edges: false, rough: 0.3, metal: 0.9 });
       rod.position.set(dx, dy, top + 0.04);
       unit.add(rod);
     }
   } else {
-    const block = box(0.14, 0.19, Z_LOWER_BEAM - top - 0.004, color.wood);   // houten blok tot onder de balk
+    const block = box(0.14, 0.19, Z_LOWER_BEAM - top - 0.004, color.wood, { rough: 0.85 });   // houten blok tot onder de balk
     block.position.z = top + 0.004;
     unit.add(block);
   }
@@ -86,14 +88,14 @@ export class RobotModel {
     // Onderste balken (bruin) dwars, bovenste (zwart) in de lengte, zoals Bruut_OpenAgbot.FCStd
     for (const y of [0, L]) {
       for (const dy of [-0.075, 0.075]) {
-        const b = box(T + 0.3, 0.04, 0.04, color.beam_lower);
+        const b = box(T + 0.3, 0.04, 0.04, color.beam_lower, { rough: 0.55, metal: 0.35 });
         b.position.set(0, y + dy, zTop);
         body.add(b);
       }
     }
     for (const x of [-T / 2, T / 2]) {
       for (const dx of [-0.05, 0.05]) {
-        const b = box(0.04, L + 0.4, 0.04, color.beam_upper);
+        const b = box(0.04, L + 0.4, 0.04, color.beam_upper, { rough: 0.45, metal: 0.4 });
         b.position.set(x + dx, L / 2, zTop + 0.04);
         body.add(b);
       }
@@ -102,20 +104,21 @@ export class RobotModel {
     const [fwd, right] = spec.antenna1;
     const h = spec.antenna_height;
     for (const extra of [0, spec.baseline]) {
-      const mast = cylinderZ(0.012, h - zTop - 0.06, color.zinc, { segments: 10, edges: false });
+      const mast = cylinderZ(0.012, h - zTop - 0.06, color.zinc, { segments: 10, edges: false, rough: 0.3, metal: 0.9 });
       mast.position.set(right, fwd + extra, zTop + 0.06);
       const dome = new THREE.Mesh(new THREE.SphereGeometry(0.08, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
-        mat(color.white));
+        mat(color.white, { rough: 0.35 }));
       dome.rotation.x = Math.PI / 2;
       dome.position.set(right, fwd + extra, h);
+      dome.castShadow = true;
       body.add(mast, dome);
     }
-    const arm = box(Math.abs(right) + 0.1, 0.04, 0.03, color.zinc);
+    const arm = box(Math.abs(right) + 0.1, 0.04, 0.03, color.zinc, { rough: 0.3, metal: 0.9 });
     arm.position.set(right / 2, fwd, zTop + 0.06);
     body.add(arm);
     // Statusbaken (groen = rijden, oranje = langzaam/wacht, rood = vast/fout)
     this.beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.1, 16),
-      new THREE.MeshLambertMaterial({ color: 0x22cc44, emissive: 0x115522 }));
+      new THREE.MeshStandardMaterial({ color: 0x22cc44, emissive: 0x22cc44, emissiveIntensity: 2.2, roughness: 0.3 }));
     this.beacon.rotation.x = Math.PI / 2;
     this.beacon.position.set(0, L / 2, zTop + 0.13);
     body.add(this.beacon);
@@ -134,6 +137,6 @@ export class RobotModel {
   setBeacon(state) {
     const c = { green: color.beacon_green, amber: color.beacon_amber, red: color.beacon_red }[state] || color.beacon_green;
     this.beacon.material.color.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
-    this.beacon.material.emissive.setRGB(c[0] * 0.4, c[1] * 0.4, c[2] * 0.4, THREE.SRGBColorSpace);
+    this.beacon.material.emissive.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
   }
 }

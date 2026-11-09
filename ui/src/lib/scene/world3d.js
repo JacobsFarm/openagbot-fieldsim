@@ -1,42 +1,54 @@
-// De 3D-wereld: terrein, velden, gebouwen, robot, missie en spoor. Z-as omhoog, zoals ENU in de sim.
+// De 3D-wereld: terrein, velden, water, gebouwen, robot, missie en spoor. Z-as omhoog, zoals ENU in de sim.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { background, color, fovDeg, surfaceColor } from '../../theme.js';
+import { color, fovDeg } from '../../theme.js';
 import { building, fences, trees } from './buildings.js';
-import { lineMat, solid } from './materials.js';
+import { groundMat, ORDER, setEdges, solid, viewHeight, waterMat } from './materials.js';
 import { ImplementModel } from './implement.js';
 import { RobotModel } from './robot.js';
-import { drapeLine, drapePolygon, drapeStrip, Heightfield, terrainMesh } from './terrain.js';
+import { Atmosphere } from './sky.js';
+import { bufferLine, drapePolygon, drapeStrip, flatDecal, Heightfield, horizon, ribbon, terrainMesh,
+  waterBodies } from './terrain.js';
+import { cropTexture, surfaceTexture, textures } from './textures.js';
 
-// Camerastanden. 'volg' = zoals track_camera() in de veldanimaties: schuin achter en boven de robot.
+// Camerastanden. 'volg' = schuin achter en boven de robot; 'rond' = rustig rondje om het erf (hoofdmenu).
 export const CAMERA_MODES = ['volg', 'vrij', 'boven'];
 const FOLLOW = { back: 7.5, up: 5.0, ahead: 2.0 };
+const BANK_M = 0.9;                       // oeverbreedte bij water uit de kaart (BGT kent alleen de waterlijn)
+// Verharding ligt in beeld bovenop de velden: een kavelpad langs de perceelgrens blijft zo altijd zichtbaar
+const HARD = new Set(['track', 'paved', 'road', 'yard']);
+
+export const QUALITY = {
+  laag: { pixelRatio: 1, shadows: false, shadowSize: 1024, terrainCell: 2 },
+  normaal: { pixelRatio: 1.25, shadows: true, shadowSize: 2048, terrainCell: 1 },
+  hoog: { pixelRatio: 2, shadows: true, shadowSize: 4096, terrainCell: 1 },
+};
 
 export class World3D {
   constructor(container) {
     this.container = container;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(background);
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+    this.maxPixelRatio = 1.25;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.maxPixelRatio));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.8;
     container.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(background);
-    this.camera = new THREE.PerspectiveCamera(fovDeg, 1, 0.5, 6000);
+    this.camera = new THREE.PerspectiveCamera(fovDeg, 1, 0.4, 24000);
     this.camera.up.set(0, 0, 1);
-    // FreeCAD-headlight: lamp vanuit de camera, plus zacht omgevingslicht. Geen schaduwen.
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xb8b8b0, 1.35));
-    this.headlight = new THREE.DirectionalLight(0xffffff, 1.55);
-    // Lamp en doel hangen allebei aan de camera: het licht valt altijd mee met de kijkrichting.
-    this.camera.add(this.headlight, this.headlight.target);
-    this.headlight.position.set(0.4, 0.6, 0);
-    this.headlight.target.position.set(0, 0, -1);
     this.scene.add(this.camera);
+    this.atmosphere = new Atmosphere(this.renderer, this.scene);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.screenSpacePanning = false;
     this.controls.maxPolarAngle = Math.PI * 0.49;
+    this.controls.minDistance = 2;
+    this.controls.maxDistance = 2500;
     this.mode = 'volg';
     this.layers = {};
+    this.hidden = new Set(['nogo']);            // lagen die uit staan (blijft zo bij een andere wereld)
     this.world = new THREE.Group();
     this.scene.add(this.world);
     this.overlay = new THREE.Group();
@@ -51,17 +63,23 @@ export class World3D {
     this.trailPts = [];
     this.trailWidth = 0;
     this.onPick = null;
-    this._raycaster = new THREE.Raycaster();
-    this._pickables = [];
+    this._labels = [];
+    this._clock = new THREE.Clock();
+    this._tmp = new THREE.Vector3();
     this._resize = new ResizeObserver(() => this.resize());
     this._resize.observe(container);
     this.renderer.domElement.addEventListener('dblclick', (e) => this._pick(e));
-    this.controls.addEventListener('start', () => { if (this.mode === 'volg') this.setMode('vrij'); });
+    this.controls.addEventListener('start', () => { if (this.mode === 'volg' || this.mode === 'rond') this.setMode('vrij'); });
     this.resize();
     const loop = () => {
       this._raf = requestAnimationFrame(loop);
-      this._updateCamera();
+      const t = this._clock.getElapsedTime();
+      this._updateCamera(t);
       this.controls.update();
+      this._updateLabels();
+      const n = textures().waterNormal;
+      n.offset.set(t * 0.012, t * 0.007);
+      this.atmosphere.update(t, this.controls.target, this.camera.position.distanceTo(this.controls.target));
       this.renderer.render(this.scene, this.camera);
     };
     loop();
@@ -70,65 +88,115 @@ export class World3D {
   dispose() {
     cancelAnimationFrame(this._raf);
     this._resize.disconnect();
+    this.atmosphere.dispose();
     this.renderer.dispose();
     this.container.removeChild(this.renderer.domElement);
   }
 
   resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.maxPixelRatio));
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    viewHeight.value = h / (2 * Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2));
   }
+
+  // ------------------------------------------------------------------ instellingen
+  setQuality(name) {
+    const q = QUALITY[name] ?? QUALITY.normaal;
+    this.maxPixelRatio = q.pixelRatio;
+    this.atmosphere.setShadows(this._shadowsWanted ?? q.shadows, q.shadowSize);
+    this.resize();
+  }
+
+  setShadows(on) { this._shadowsWanted = on; this.atmosphere.setShadows(on); }
+  setHour(h) { this.atmosphere.setHour(h); }
+  setClouds(on) { this.atmosphere.setClouds(on); }
+  setEdges(on) { setEdges(on); }
 
   // ------------------------------------------------------------------ wereld opbouwen
   load(scene, terrainHeader, heights) {
+    this.world.traverse((o) => o.geometry?.dispose());
     this.world.clear();
     this.overlay.clear();
     this.clearTrail();
     this.clearStrip();
     this.setPoints(null);
     this.setReplay(null);
-    this._pickables = [];
+    this._labels = [];
+    this.layers = {};
     this.sceneData = scene;
     const hf = new Heightfield(terrainHeader, heights);
     this.hf = hf;
-    const add = (name, obj) => { obj.name = name; this.world.add(obj); this.layers[name] = obj; return obj; };
+    const add = (name, obj) => {
+      obj.name = name;
+      obj.visible = !this.hidden.has(name);
+      this.world.add(obj);
+      this.layers[name] = obj;
+      return obj;
+    };
 
-    add('terrain', terrainMesh(hf, color.grass));
+    // Water: BGT-vlakken met een peil en sloten als hartlijn; beide worden een veelhoek met oevers
+    const bodies = [];
+    const nogo = new THREE.Group(), far = new THREE.Group();
+    for (const s of scene.surfaces) {
+      if (s.kind !== 'water') continue;
+      const level = s.level ?? s.poly.reduce((a, p) => a + hf.at(p[0], p[1]), 0) / s.poly.length - 0.3;
+      bodies.push({ poly: s.poly, level, bank: BANK_M });
+      far.add(ribbon(s.poly, hf, color.water, { closed: true, width: 0.02, px: 1.0, z: level + 0.02, order: ORDER.water + 1 }));
+      nogo.add(ribbon(s.poly, hf, color.nogo, { closed: true, width: 0.14, px: 1.5, offset: 0.12, order: ORDER.overlay + 2 }));
+    }
+    for (const d of scene.ditches) {
+      // Zelfde profiel als de fysica (terrain._carve_ditch): talud van de insteek naar de bodem, water tot het peil
+      const half = d.width / 2, talud = Math.max(0.2, Math.min(d.depth, half * 0.7));
+      const waterHalf = Math.max(0.15, half - talud * (1 - (d.water_depth ?? 0.3) / d.depth));
+      bodies.push({ poly: bufferLine(d.line, waterHalf), level: d.level, bank: half - waterHalf });
+      // van ver weg is een sloot van 2 m minder dan een beeldpunt: dit lint houdt hem zichtbaar
+      far.add(ribbon(d.line, hf, color.water, { width: 0.02, px: 1.6, z: d.level + 0.02, order: ORDER.water + 1 }));
+      nogo.add(ribbon(bufferLine(d.line, half), hf, color.nogo, { closed: true, width: 0.14, px: 1.5, offset: 0.12,
+        order: ORDER.overlay + 2 }));
+    }
+    const water = waterBodies(bodies, hf);
+
+    const ground = new THREE.Group();
+    ground.add(horizon(hf), terrainMesh(hf, water.zShow));
+    add('terrain', ground);
+    water.group.add(far);
+    add('ditches', water.group);
+    add('nogo', nogo);
 
     const surfaces = new THREE.Group();
-    for (const s of scene.surfaces) {
-      // Water met een peil (BGT) ligt vlak; de rest volgt het terrein
-      const flat = s.level !== null && s.level !== undefined;
-      const m = drapePolygon(s.poly, hf, surfaceColor(s.kind), { offset: 0.02, layer: flat ? 3 : 1, z: flat ? s.level : null,
-        maxEdge: flat ? 50 : 4 });
-      surfaces.add(m, drapeLine(s.poly, hf, { closed: true, offset: 0.04 }));
-    }
+    const mats = {};
+    scene.surfaces.forEach((s, i) => {
+      if (s.kind === 'water') return;
+      mats[s.kind] ??= groundMat(surfaceTexture(s.kind), { macroAmount: HARD.has(s.kind) ? 0.1 : 0.3 });
+      const order = (HARD.has(s.kind) ? ORDER.field + 2 : ORDER.surface) + (i / scene.surfaces.length) * 5;
+      surfaces.add(drapePolygon(s.poly, hf, mats[s.kind], { order }));
+    });
     add('surfaces', surfaces);
 
-    const fields = new THREE.Group();
+    const fields = new THREE.Group(), bounds = new THREE.Group(), labels = new THREE.Group();
     for (const f of scene.fields) {
-      const m = drapePolygon(f.poly, hf, color.field, { offset: 0.03, layer: 2 });
+      const tex = cropTexture(f.crop);
+      const m = drapePolygon(f.poly, hf, groundMat(tex, { angle: tex.rows ? longestEdgeAngle(f.poly) : 0 }),
+        { order: ORDER.field, offset: 0.03 });
       m.userData = { kind: 'field', id: f.id, name: f.name };
-      this._pickables.push(m);
-      fields.add(m, drapeLine(f.poly, hf, { closed: true, offset: 0.06 }));
-    }
-    add('fields', fields);
-
-    const water = new THREE.Group();
-    for (const d of scene.ditches) {
-      const strip = drapeStrip(d.line, d.width * 0.72, hf, color.water, { z: d.level, layer: 3 });
-      if (strip) water.add(strip);
-      for (const side of [-1, 1]) {
-        // slootkanten als lijn: de FreeCAD-omlijning van het water
-        const off = offsetLine(d.line, side * d.width / 2);
-        water.add(drapeLine(off, hf, { offset: 0.05 }));
+      fields.add(m);
+      bounds.add(ribbon(f.poly, hf, color.boundary, { closed: true, width: 0.3, px: 1.1, offset: 0.08 }));
+      if (f.area_ha >= 0.25) {
+        const l = label(f.name, `${f.crop ? f.crop + ' · ' : ''}${f.area_ha} ha`);
+        l.position.set(f.center[0], f.center[1], hf.at(f.center[0], f.center[1]) + 2.5);
+        l.userData.size = Math.sqrt(f.area_ha * 1e4);
+        labels.add(l);
+        this._labels.push(l);
       }
     }
-    add('ditches', water);
+    add('fields', fields);
+    add('boundaries', bounds);
+    add('labels', labels);
 
     const bld = new THREE.Group();
     for (const b of scene.buildings) bld.add(building(b));
@@ -144,10 +212,11 @@ export class World3D {
     this.setRobot({ x: s.x, y: s.y, z: hf.at(s.x, s.y), heading: s.heading, pitch: 0, roll: 0,
       wheel_left_deg: 0, wheel_right_deg: 0 });
     this._snap = true;          // eerste beeld direct achter de robot, niet vanaf de oorsprong inzwaaien
-    this.setMode('volg');
+    this.setMode(this.mode === 'rond' ? 'rond' : 'volg');
   }
 
   setLayerVisible(name, on) {
+    if (on) this.hidden.delete(name); else this.hidden.add(name);
     if (this.layers[name]) this.layers[name].visible = on;
   }
 
@@ -166,7 +235,8 @@ export class World3D {
     if (!spec || !this.robot) return;
     this.implement = new ImplementModel(spec);
     this.robot.body.add(this.implement.group);
-    this._stripColor = new THREE.Color(spec.color);
+    const c = new THREE.Color(spec.color).convertLinearToSRGB();
+    this._stripMat = flatDecal([c.r, c.g, c.b]);
   }
 
   updateImplement(s) {
@@ -188,9 +258,9 @@ export class World3D {
   setTargetStatus(targets) {
     const inst = this._pointsInst;
     if (!inst || !targets) return;
-    const col = { open: 0xe66e14, done: 0x2e9e44, missed_speed: 0xd02a2a, out_of_reach: 0x8e44ad };
+    const col = { open: 0xffa02e, done: 0x7ddc3c, missed_speed: 0xff4a3d, out_of_reach: 0xb06cff };
     const c = new THREE.Color();
-    targets.forEach((t, i) => { if (i < inst.count) inst.setColorAt(i, c.set(col[t.status] ?? 0xe66e14)); });
+    targets.forEach((t, i) => { if (i < inst.count) inst.setColorAt(i, c.set(col[t.status] ?? col.open)); });
     if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
   }
 
@@ -211,10 +281,11 @@ export class World3D {
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
         g.computeVertexNormals();
-        const m = new THREE.MeshLambertMaterial({ color: this._stripColor, side: THREE.DoubleSide,
-          transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 0,
-          polygonOffsetUnits: -16 });
-        this.stripGroup.add(new THREE.Mesh(g, m));
+        const m = new THREE.Mesh(g, this._stripMat ?? flatDecal(color.treated));
+        m.receiveShadow = true;
+        m.renderOrder = ORDER.overlay;
+        m.raycast = () => {};
+        this.stripGroup.add(m);
       }
       this._stripStart = end;
     };
@@ -241,6 +312,8 @@ export class World3D {
       this.camera.position.set(r.x, r.y - 1, r.z + 120);
     } else if (mode === 'vrij') {
       this.controls.target.set(r.x, r.y, r.z + 0.4);
+    } else if (mode === 'rond') {
+      this._orbit = { x: r.x, y: r.y, z: r.z, t0: this._clock.getElapsedTime() };
     }
   }
 
@@ -251,54 +324,87 @@ export class World3D {
     this.camera.position.set(x - dist * 0.25, y - dist * 0.8, z + dist * 0.6);
   }
 
-  _updateCamera() {
+  _updateCamera(t) {
     const r = this.robotPose;
-    if (!r || this.mode !== 'volg') return;
+    if (!r) return;
+    if (this.mode === 'rond' && this._orbit) {
+      const o = this._orbit, a = 0.6 + (t - o.t0) * 0.035;
+      this.camera.position.set(o.x + Math.sin(a) * 120, o.y - Math.cos(a) * 120, o.z + 46);
+      this.controls.target.set(o.x, o.y, o.z + 3);
+      return;
+    }
+    if (this.mode !== 'volg') return;
     const h = THREE.MathUtils.degToRad(r.heading);
     const fx = Math.sin(h), fy = Math.cos(h);
     const tx = r.x + fx * FOLLOW.ahead, ty = r.y + fy * FOLLOW.ahead;
-    const want = new THREE.Vector3(r.x - fx * FOLLOW.back + fy * 2.5, r.y - fy * FOLLOW.back - fx * 2.5,
-      r.z + FOLLOW.up);
+    const want = this._tmp.set(r.x - fx * FOLLOW.back + fy * 2.5, r.y - fy * FOLLOW.back - fx * 2.5, r.z + FOLLOW.up);
     const k = this._snap ? 1 : 0.08;
     this._snap = false;
     this.camera.position.lerp(want, k);
-    this.controls.target.lerp(new THREE.Vector3(tx, ty, r.z + 0.3), k === 1 ? 1 : 0.15);
+    this.controls.target.lerp(want.set(tx, ty, r.z + 0.3), k === 1 ? 1 : 0.15);
   }
 
-  _pick(e) {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    const p = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1);
-    this._raycaster.setFromCamera(p, this.camera);
-    const hits = this._raycaster.intersectObjects([...this._pickables, this.layers.terrain].filter(Boolean), false);
-    if (hits.length && this.onPick) {
-      const h = hits[0];
-      this.onPick({ x: h.point.x, y: h.point.y, field: h.object.userData?.kind === 'field' ? h.object.userData : null });
+  // Veldnamen: zichtbaar zodra het veld groot genoeg in beeld is, weg als je er middenin staat
+  _updateLabels() {
+    if (!this.layers.labels?.visible) return;
+    const menu = this.mode === 'rond';
+    const cam = this.camera.position;
+    for (const l of this._labels) {
+      const d = cam.distanceTo(l.position);
+      const k = l.userData.size / d;                 // veldmaat / afstand ~ grootte in beeld
+      const a = THREE.MathUtils.smoothstep(k, 0.09, 0.16) * THREE.MathUtils.smoothstep(d, 22, 45);
+      l.visible = a > 0.02 && !menu;
+      l.material.opacity = a;
     }
+  }
+
+  // Dubbelklik: straal door het hoogteraster stappen (snel, ook bij een terrein van een miljoen punten)
+  _pick(e) {
+    if (!this.hf || !this.onPick) return;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1), this.camera);
+    const o = ray.ray.origin, d = ray.ray.direction;
+    if (d.z >= -1e-4) return;
+    let s = Math.max(0, (o.z - 40) / -d.z), hit = null;
+    for (let i = 0; i < 20000 && s < 6000; i++) {
+      const x = o.x + d.x * s, y = o.y + d.y * s, z = o.z + d.z * s;
+      if (z <= this.hf.at(x, y)) { hit = [x, y]; break; }
+      s += Math.max(0.15, (z - this.hf.at(x, y)) * 0.5);
+    }
+    if (!hit) return;
+    const f = this.layers.fields?.visible === false ? null
+      : this.sceneData.fields.find((fd) => inPolygon(hit[0], hit[1], fd.poly));
+    this.onPick({ x: hit[0], y: hit[1], field: f ? { kind: 'field', id: f.id, name: f.name } : null });
   }
 
   // ------------------------------------------------------------------ missie en spoor
   setMission(plan) {
+    this.overlay.traverse((o) => o.geometry?.dispose());
     this.overlay.clear();
+    this._path = null;
     if (!plan || !this.hf) return;
     for (const [a, b] of plan.swaths) {
-      this.overlay.add(drapeLine([a, b], this.hf, { color: color.lines, offset: 0.07, maxSeg: 4 }));
+      this.overlay.add(ribbon([a, b], this.hf, color.lines, { width: 0.07, px: 0.7, offset: 0.07, maxSeg: 4 }));
     }
-    for (const [p, label] of [[plan.a, 'A'], [plan.b, 'B']]) {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.2, 4), new THREE.MeshLambertMaterial({ color: 0xe66e14 }));
+    for (const [p, c] of [[plan.a, 0xb9e34a], [plan.b, 0xffb23e]]) {
+      const m = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.3, 16),
+        new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.6, roughness: 0.4 }));
       m.rotation.x = -Math.PI / 2;
-      m.position.set(p[0], p[1], this.hf.at(p[0], p[1]) + 0.7);
-      m.userData.label = label;
+      m.position.set(p[0], p[1], this.hf.at(p[0], p[1]) + 0.75);
+      m.castShadow = true;
       this.overlay.add(m);
     }
     this.trailWidth = plan.entry?.werkbreedte_m ?? 0;
   }
 
   setPlannedPath(points) {
-    if (this._path) this.overlay.remove(this._path);
+    if (this._path) { this.overlay.remove(this._path); this._path.geometry.dispose(); }
     this._path = null;
     if (!points || points.length < 2 || !this.hf) return;
-    this._path = drapeLine(points, this.hf, { color: color.path, offset: 0.1, maxSeg: 1, dashed: true });
+    this._path = ribbon(points, this.hf, color.path, { width: 0.12, px: 1.3, offset: 0.1, maxSeg: 1, dash: 1.2,
+      order: ORDER.overlay + 1 });
     this.overlay.add(this._path);
   }
 
@@ -309,11 +415,12 @@ export class World3D {
     if (!xs || xs.length < 2 || !this.hf) return;
     const group = new THREE.Group();
     const pts = xs.map((x, i) => [x, ys[i]]);
-    group.add(drapeLine(pts, this.hf, { color: [0.90, 0.43, 0.08], offset: 0.12, maxSeg: 50 }));
+    group.add(ribbon(pts, this.hf, [1.0, 0.48, 0.12], { width: 0.14, px: 1.4, offset: 0.12, maxSeg: 50,
+      order: ORDER.overlay + 1 }));
     const shape = new THREE.Shape([new THREE.Vector2(0, 0.9), new THREE.Vector2(0.45, -0.5), new THREE.Vector2(0, -0.25),
       new THREE.Vector2(-0.45, -0.5)]);
     const g = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
-    this._ghost = solid(g, [0.90, 0.43, 0.08]);
+    this._ghost = solid(g, [1.0, 0.48, 0.12], { edges: false });
     this._ghost.rotation.order = 'ZXY';
     group.add(this._ghost);
     this._replay = group;
@@ -326,31 +433,35 @@ export class World3D {
     this._ghost.rotation.z = -THREE.MathUtils.degToRad(heading);
   }
 
-  // Puntmissie: oranje paaltjes met de route ertussen (in volgorde)
+  // Puntmissie: paaltjes met de route ertussen (in volgorde)
   setPoints(points) {
     if (this._points) this.scene.remove(this._points);
     this._points = null;
     this._pointsInst = null;
     if (!points?.length || !this.hf) return;
     const group = new THREE.Group();
-    const g = new THREE.CylinderGeometry(0.12, 0.12, 0.6, 10);
+    const g = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 12);
     g.rotateX(Math.PI / 2);
-    g.translate(0, 0, 0.3);
-    const inst = new THREE.InstancedMesh(g, new THREE.MeshLambertMaterial({ color: 0xffffff }), points.length);
+    g.translate(0, 0, 0.35);
+    const inst = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }), points.length);
     this._pointsInst = inst;
+    inst.castShadow = true;
+    inst.frustumCulled = false;
     const m = new THREE.Matrix4();
-    const orange = new THREE.Color(0xe66e14);
+    const orange = new THREE.Color(0xffa02e);
     points.forEach((p, i) => { inst.setMatrixAt(i, m.makeTranslation(p.x, p.y, this.hf.at(p.x, p.y)));
       inst.setColorAt(i, orange); });
     group.add(inst);
     if (points.length > 1) {
-      group.add(drapeLine(points.map((p) => [p.x, p.y]), this.hf, { color: [0.90, 0.43, 0.08], offset: 0.15, maxSeg: 3 }));
+      group.add(ribbon(points.map((p) => [p.x, p.y]), this.hf, [1.0, 0.63, 0.18], { width: 0.08, px: 0.9, offset: 0.15,
+        maxSeg: 3, order: ORDER.overlay + 1 }));
     }
     this._points = group;
     this.scene.add(group);
   }
 
   clearTrail() {
+    this.trailGroup.traverse((o) => o.geometry?.dispose());
     this.trailGroup.clear();
     this.trailPts = [];
     this._trailChunkStart = 0;
@@ -359,26 +470,66 @@ export class World3D {
   addTrail(points) {
     if (!this.hf || !points.length) return;
     this.trailPts.push(...points);
-    // Per 40 punten (ca. 8 m) een nieuw stuk: een bewerkte strook (bij een missie) of een smal wit spoor
+    // Per 40 punten (ca. 8 m) een nieuw stuk: een bewerkte strook (bij een missie) of een smal spoor
     while (this.trailPts.length - this._trailChunkStart >= 40) {
       const chunk = this.trailPts.slice(this._trailChunkStart, this._trailChunkStart + 41);
       this._trailChunkStart += 40;
       const strip = this.trailWidth > 0 && this.implement?.spec.kind !== 'strip'
-        ? drapeStrip(chunk, this.trailWidth, this.hf, color.treated, { offset: 0.05, layer: 3 })
-        : drapeStrip(chunk, 0.12, this.hf, color.path, { offset: 0.05, layer: 3 });
+        ? drapeStrip(chunk, this.trailWidth, this.hf, flatDecal(color.treated), { offset: 0.05 })
+        : ribbon(chunk, this.hf, [0.95, 0.97, 1.0], { width: 0.1, px: 0.8, offset: 0.06, maxSeg: 2, order: ORDER.overlay });
       if (strip) this.trailGroup.add(strip);
     }
   }
 }
 
-function offsetLine(line, d) {
-  return line.map((p, i) => {
-    const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
-    let dx = b[0] - a[0], dy = b[1] - a[1];
-    const l = Math.hypot(dx, dy) || 1;
-    dx /= l; dy /= l;
-    return [p[0] + dy * d, p[1] - dx * d];
-  });
+function longestEdgeAngle(poly) {
+  let best = 0, angle = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (l > best) { best = l; angle = Math.atan2(b[1] - a[1], b[0] - a[0]); }
+  }
+  return angle;
 }
 
-export { lineMat };
+function inPolygon(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Naamkaartje boven een veld: altijd even groot in beeld, dwars door alles heen leesbaar
+function label(title, sub) {
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  const f1 = '600 44px "Barlow Condensed", "Bahnschrift", "Segoe UI", sans-serif';
+  const f2 = '500 26px "Barlow", "Segoe UI", sans-serif';
+  ctx.font = f1;
+  const w1 = ctx.measureText(title.toUpperCase()).width;
+  ctx.font = f2;
+  const w = Math.ceil(Math.max(w1, ctx.measureText(sub).width)) + 56;
+  c.width = w; c.height = 112;
+  ctx.fillStyle = 'rgba(11,17,21,0.78)';
+  ctx.beginPath(); ctx.roundRect(0, 0, w, 112, 10); ctx.fill();
+  ctx.fillStyle = '#B9E34A';
+  ctx.fillRect(0, 0, 6, 112);
+  ctx.textBaseline = 'middle';
+  ctx.font = f1; ctx.fillStyle = '#F2F6F7';
+  ctx.fillText(title.toUpperCase(), 28, 40);
+  ctx.font = f2; ctx.fillStyle = '#A9B8BF';
+  ctx.fillText(sub, 28, 82);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, sizeAttenuation: false, depthTest: false, transparent: true,
+    fog: false, toneMapped: false }));
+  const k = 0.00034;
+  s.scale.set(w * k, 112 * k, 1);
+  s.renderOrder = 50;
+  s.raycast = () => {};
+  return s;
+}
+
+export { waterMat };
