@@ -35,6 +35,7 @@ SURFACE_KINDS = {
 }
 
 LatLon = tuple[float, float]
+BRIDGING = ("dam", "duiker", "brug")      # doorgangen die een sloot dichtmaken (berijdbaar, geen water)
 
 
 def _round_ll(pts) -> list[list[float]]:
@@ -47,14 +48,31 @@ class Surface:
     polygon: list[LatLon]
     name: str = ""
     level_m: float | None = None      # waterpeil (alleen water uit de BGT); None = volgt het terrein
+    id: str = ""
+    source: str = "bron"
     xy: list[Point] = field(default_factory=list, repr=False)
 
     def to_dict(self):
-        d = {"kind": self.kind, "polygon": _round_ll(self.polygon)}
+        d = {"id": self.id, "kind": self.kind, "polygon": _round_ll(self.polygon)}
         if self.name:
             d["name"] = self.name
         if self.level_m is not None:
             d["level_m"] = self.level_m
+        return d
+
+
+@dataclass
+class Hole:
+    """Gat in een veld (zoals een binnengrens in AgOpenGPS). `passable`: de robot mag erdoor rijden, niet werken."""
+    polygon: list[LatLon]
+    passable: bool = False
+    name: str = ""
+    xy: list[Point] = field(default_factory=list, repr=False)
+
+    def to_dict(self):
+        d = {"polygon": _round_ll(self.polygon), "passable": self.passable}
+        if self.name:
+            d["name"] = self.name
         return d
 
 
@@ -64,10 +82,21 @@ class Field:
     name: str
     polygon: list[LatLon]
     crop: str = ""
+    holes: list[Hole] = field(default_factory=list)
+    headland_rounds: int | None = None      # standaard voor de missie van dit veld; None = instelling van de missie
+    work_width_m: float | None = None
+    source: str = "bron"
     xy: list[Point] = field(default_factory=list, repr=False)
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "crop": self.crop, "polygon": _round_ll(self.polygon)}
+        d = {"id": self.id, "name": self.name, "crop": self.crop, "polygon": _round_ll(self.polygon)}
+        if self.holes:
+            d["holes"] = [h.to_dict() for h in self.holes]
+        if self.headland_rounds is not None:
+            d["headland_rounds"] = self.headland_rounds
+        if self.work_width_m is not None:
+            d["work_width_m"] = self.work_width_m
+        return d
 
 
 @dataclass
@@ -91,6 +120,7 @@ class Building:
     footprint: list[LatLon]
     height_m: float               # goothoogte (bovenkant muur)
     roof: Roof = field(default_factory=Roof)
+    source: str = "bron"
     xy: list[Point] = field(default_factory=list, repr=False)
 
     def to_dict(self):
@@ -104,24 +134,38 @@ class Tree:
     lon: float
     height_m: float = 12.0
     crown: str = "ball"           # ball | cone
+    id: str = ""
+    clearance_m: float | None = None    # eigen vrije ruimte vanaf de stam; None = de standaard voor bomen
+    source: str = "bron"
     xy: Point = (0.0, 0.0)
 
     def to_dict(self):
-        return {"lat": round(self.lat, 9), "lon": round(self.lon, 9), "height_m": self.height_m, "crown": self.crown}
+        d = {"id": self.id, "lat": round(self.lat, 9), "lon": round(self.lon, 9), "height_m": self.height_m,
+             "crown": self.crown}
+        if self.clearance_m is not None:
+            d["clearance_m"] = self.clearance_m
+        return d
 
 
 @dataclass
 class Ditch:
-    """Sloot als hartlijn met breedte en diepte; wordt in het terrein uitgegraven en als water getekend."""
+    """Sloot als hartlijn met breedte en diepte; wordt in het terrein uitgegraven en als water getekend.
+    Niet over te steken, behalve bij een doorgang (Passage)."""
     line: list[LatLon]
     width_m: float = 2.0
     depth_m: float = 0.8
     water_depth_m: float = 0.3
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
     xy: list[Point] = field(default_factory=list, repr=False)
 
     def to_dict(self):
-        return {"line": _round_ll(self.line), "width_m": self.width_m, "depth_m": self.depth_m,
-                "water_depth_m": self.water_depth_m}
+        d = {"id": self.id, "line": _round_ll(self.line), "width_m": self.width_m, "depth_m": self.depth_m,
+             "water_depth_m": self.water_depth_m}
+        if self.name:
+            d["name"] = self.name
+        return d
 
 
 @dataclass
@@ -129,10 +173,147 @@ class Fence:
     line: list[LatLon]
     height_m: float = 1.2
     post_spacing_m: float = 4.0
+    id: str = ""
+    source: str = "bron"
     xy: list[Point] = field(default_factory=list, repr=False)
 
     def to_dict(self):
-        return {"line": _round_ll(self.line), "height_m": self.height_m, "post_spacing_m": self.post_spacing_m}
+        return {"id": self.id, "line": _round_ll(self.line), "height_m": self.height_m,
+                "post_spacing_m": self.post_spacing_m}
+
+
+DIKE_MODES = ("ontwijken", "negeren", "doorgang")     # doorgang = alleen over bij een helling/doorgang
+
+
+@dataclass
+class Dike:
+    """Dijk als kruinlijn met kruinbreedte, hoogte en talud (1 : slope). Verhoogt het terrein."""
+    line: list[LatLon]
+    crest_width_m: float = 2.0
+    height_m: float = 1.5
+    slope: float = 2.5
+    mode: str = "ontwijken"
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
+    xy: list[Point] = field(default_factory=list, repr=False)
+
+    @property
+    def half_base_m(self) -> float:
+        return self.crest_width_m / 2.0 + self.height_m * self.slope
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "line": _round_ll(self.line), "crest_width_m": self.crest_width_m,
+                "height_m": self.height_m, "slope": self.slope, "mode": self.mode}
+
+
+@dataclass
+class NoGo:
+    """Verboden gebied. `stoppen`: de robot stopt zodra hij erin komt; `mijden`: de planner rijdt eromheen."""
+    polygon: list[LatLon]
+    action: str = "stoppen"
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
+    xy: list[Point] = field(default_factory=list, repr=False)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "action": self.action, "polygon": _round_ll(self.polygon)}
+
+
+ZONE_CLASSES = ("werken", "alleen_rijden", "niet_bewerken", "verboden")
+
+
+@dataclass
+class Zone:
+    """Rijzone: `werken`, `alleen_rijden` (transport, werktuig omhoog), `niet_bewerken` (stuk van een veld dat de
+    missie overslaat, bv. een punt of uitstulping; rijden en keren mag er wel) of `verboden`."""
+    polygon: list[LatLon]
+    klass: str = "alleen_rijden"
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
+    xy: list[Point] = field(default_factory=list, repr=False)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "klass": self.klass, "polygon": _round_ll(self.polygon)}
+
+
+PASSAGE_KINDS = ("dam", "duiker", "brug", "hek", "oversteek", "oprit")
+
+
+@dataclass
+class Passage:
+    """Doorgang: de enige plek waar de robot een sloot, dijk, hek of weg mag passeren, en van veld naar veld mag.
+
+    `line` is de rijlijn door de doorgang (van binnen het ene veld tot binnen het andere). `direction`: beide,
+    heen (alleen in de richting van de lijn) of terug. `confirm`: eerst stoppen en wachten op vrijgave (oversteek).
+    """
+    line: list[LatLon]
+    width_m: float = 4.0
+    kind: str = "dam"
+    direction: str = "beide"
+    max_speed_kmh: float = 2.0
+    confirm: bool = False
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
+    xy: list[Point] = field(default_factory=list, repr=False)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "kind": self.kind, "line": _round_ll(self.line),
+                "width_m": self.width_m, "direction": self.direction, "max_speed_kmh": self.max_speed_kmh,
+                "confirm": self.confirm}
+
+
+@dataclass
+class Nest:
+    """Vogelnest: punt met straal, alleen verboden in zijn periode (maand-dag, bv. 03-15 tot 08-15)."""
+    lat: float
+    lon: float
+    radius_m: float = 5.0
+    start: str = "03-15"
+    end: str = "08-15"
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
+    xy: Point = (0.0, 0.0)
+
+    def active(self, date=None) -> bool:
+        import datetime
+        if date is None:
+            date = datetime.date.today()
+        elif isinstance(date, str):
+            date = datetime.date.fromisoformat(date[:10])
+        try:
+            a = tuple(int(v) for v in self.start.split("-"))
+            b = tuple(int(v) for v in self.end.split("-"))
+        except ValueError:
+            return True                      # onleesbare periode: voor de zekerheid altijd actief
+        d = (date.month, date.day)
+        return a <= d <= b if a <= b else (d >= a or d <= b)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "lat": round(self.lat, 9), "lon": round(self.lon, 9),
+                "radius_m": self.radius_m, "start": self.start, "end": self.end}
+
+
+@dataclass
+class Marker:
+    """Steen, paal, put of kabel: een punt om omheen te rijden (zoals een vlag in AgOpenGPS)."""
+    lat: float
+    lon: float
+    kind: str = "marker"          # marker | steen | paal | put | kabel
+    radius_m: float = 0.5         # 0 = alleen een aantekening, geen obstakel
+    note: str = ""
+    id: str = ""
+    name: str = ""
+    source: str = "bron"
+    xy: Point = (0.0, 0.0)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "kind": self.kind, "lat": round(self.lat, 9),
+                "lon": round(self.lon, 9), "radius_m": self.radius_m, "note": self.note}
 
 
 @dataclass
@@ -159,6 +340,15 @@ class World:
     trees: list[Tree] = field(default_factory=list)
     ditches: list[Ditch] = field(default_factory=list)
     fences: list[Fence] = field(default_factory=list)
+    dikes: list[Dike] = field(default_factory=list)
+    no_go: list[NoGo] = field(default_factory=list)
+    zones: list[Zone] = field(default_factory=list)
+    passages: list[Passage] = field(default_factory=list)
+    nests: list[Nest] = field(default_factory=list)
+    markers: list[Marker] = field(default_factory=list)
+    farm_settings: dict[str, Any] = field(default_factory=dict)    # uit farm.json (dijkmodus, vrije ruimtes, veiligheid)
+    overlay: bool = False               # farm.json is toegepast: niet meer als world.json opslaan
+    overlay_report: list[str] = field(default_factory=list)
     start_pose: Pose | None = None
     style: str = "freecad"
     sources: dict[str, Any] = field(default_factory=dict)
@@ -168,11 +358,23 @@ class World:
     def __post_init__(self):
         self._grid = None
         self.frame = LocalFrame(*self.origin)
+        for layer, (_, prefix) in LAYERS.items():        # in het geheugen gemaakte objecten: ook een id
+            for i, obj in enumerate(getattr(self, layer)):
+                if not obj.id:
+                    obj.id = f"{prefix}_m{i + 1}"
         self.area_xy = ccw([self.frame.to_xy(*p) for p in self.area])
         for s in self.surfaces:
             s.xy = ccw([self.frame.to_xy(*p) for p in s.polygon])
         for f in self.fields:
             f.xy = ccw([self.frame.to_xy(*p) for p in f.polygon])
+            for h in f.holes:
+                h.xy = ccw([self.frame.to_xy(*p) for p in h.polygon])
+        for g in (*self.no_go, *self.zones):
+            g.xy = ccw([self.frame.to_xy(*p) for p in g.polygon])
+        for g in (*self.dikes, *self.passages):
+            g.xy = [self.frame.to_xy(*p) for p in g.line]
+        for g in (*self.nests, *self.markers):
+            g.xy = self.frame.to_xy(g.lat, g.lon)
         for b in self.buildings:
             b.xy = ccw([self.frame.to_xy(*p) for p in b.footprint])
         for t in self.trees:
@@ -201,6 +403,9 @@ class World:
         return hit if hit is not None else self._surface_at_slow(x, y)
 
     def _surface_at_slow(self, x: float, y: float) -> str:
+        for p in self.passages:
+            if p.kind in BRIDGING and _near_line(x, y, p.xy, p.width_m / 2.0):
+                return "track"
         for d in self.ditches:
             if _near_line(x, y, d.xy, d.width_m / 2.0):
                 return "water"
@@ -239,6 +444,9 @@ class World:
             "trees": [t.to_dict() for t in self.trees],
             "fences": [f.to_dict() for f in self.fences],
         }
+        for key in NEW_LAYERS:
+            if getattr(self, key):
+                d[key] = [x.to_dict() for x in getattr(self, key)]
         d.update(self.extra)
         return d
 
@@ -249,7 +457,11 @@ class World:
         if int(d.get("version", 1)) > VERSION:
             raise ValueError(f"wereldversie {d['version']} is nieuwer dan deze sim ({VERSION})")
         known = {"format", "version", "name", "label", "datum", "style", "origin", "area", "terrain", "sources",
-                 "start_pose", "fields", "surfaces", "ditches", "buildings", "trees", "fences"}
+                 "start_pose", "fields", "surfaces", "ditches", "buildings", "trees", "fences", *NEW_LAYERS,
+                 "farm_settings", "_overlay", "_overlay_report"}
+        ensure_ids(d)
+        src = lambda x: x.get("_source", "bron")      # noqa: E731
+        ring = lambda pts: [tuple(p) for p in pts]    # noqa: E731
         o = d["origin"]
         area = d["area"]
         sp = d.get("start_pose")
@@ -264,24 +476,49 @@ class World:
             sources=d.get("sources", {}),
             start_pose=Pose(sp["lat"], sp["lon"], sp.get("heading_deg") or 0.0)
             if sp and sp.get("lat") is not None else None,
-            fields=[Field(f["id"], f.get("name", f["id"]), [tuple(p) for p in f["polygon"]], f.get("crop", ""))
+            fields=[Field(f["id"], f.get("name", f["id"]), ring(f["polygon"]), f.get("crop", ""),
+                          [Hole(ring(h["polygon"]), bool(h.get("passable", False)), h.get("name", ""))
+                           for h in f.get("holes", []) if len(h.get("polygon", [])) >= 3],
+                          f.get("headland_rounds"), f.get("work_width_m"), src(f))
                     for f in d.get("fields", [])],
-            surfaces=[Surface(s["kind"], [tuple(p) for p in s["polygon"]], s.get("name", ""), s.get("level_m"))
+            surfaces=[Surface(s["kind"], ring(s["polygon"]), s.get("name", ""), s.get("level_m"), s["id"], src(s))
                       for s in d.get("surfaces", [])],
-            ditches=[Ditch([tuple(p) for p in x["line"]], x.get("width_m", 2.0), x.get("depth_m", 0.8),
-                           x.get("water_depth_m", 0.3)) for x in d.get("ditches", [])],
+            ditches=[Ditch(ring(x["line"]), x.get("width_m", 2.0), x.get("depth_m", 0.8),
+                           x.get("water_depth_m", 0.3), x["id"], x.get("name", ""), src(x))
+                     for x in d.get("ditches", [])],
             buildings=[Building(b["id"], b.get("name", b["id"]), b.get("kind", "shed"),
-                                [tuple(p) for p in b["footprint"]], float(b["height_m"]),
-                                Roof(**(b.get("roof") or {}))) for b in d.get("buildings", [])],
-            trees=[Tree(t["lat"], t["lon"], t.get("height_m", 12.0), t.get("crown", "ball"))
-                   for t in d.get("trees", [])],
-            fences=[Fence([tuple(p) for p in f["line"]], f.get("height_m", 1.2), f.get("post_spacing_m", 4.0))
+                                ring(b["footprint"]), float(b["height_m"]),
+                                Roof(**(b.get("roof") or {})), src(b)) for b in d.get("buildings", [])],
+            trees=[Tree(t["lat"], t["lon"], t.get("height_m", 12.0), t.get("crown", "ball"), t["id"],
+                        t.get("clearance_m"), src(t)) for t in d.get("trees", [])],
+            fences=[Fence(ring(f["line"]), f.get("height_m", 1.2), f.get("post_spacing_m", 4.0), f["id"], src(f))
                     for f in d.get("fences", [])],
+            dikes=[Dike(ring(x["line"]), float(x.get("crest_width_m", 2.0)), float(x.get("height_m", 1.5)),
+                        float(x.get("slope", 2.5)), x.get("mode", "ontwijken") if x.get("mode") in DIKE_MODES
+                        else "ontwijken", x["id"], x.get("name", ""), src(x)) for x in d.get("dikes", [])],
+            no_go=[NoGo(ring(x["polygon"]), "mijden" if x.get("action") == "mijden" else "stoppen", x["id"],
+                        x.get("name", ""), src(x)) for x in d.get("no_go", [])],
+            zones=[Zone(ring(x["polygon"]), x.get("klass") if x.get("klass") in ZONE_CLASSES else "alleen_rijden",
+                        x["id"], x.get("name", ""), src(x)) for x in d.get("zones", [])],
+            passages=[Passage(ring(x["line"]), float(x.get("width_m", 4.0)), x.get("kind", "dam"),
+                              x.get("direction", "beide"), float(x.get("max_speed_kmh", 2.0)),
+                              bool(x.get("confirm", x.get("kind") == "oversteek")), x["id"], x.get("name", ""),
+                              src(x)) for x in d.get("passages", [])],
+            nests=[Nest(x["lat"], x["lon"], float(x.get("radius_m", 5.0)), x.get("start", "03-15"),
+                        x.get("end", "08-15"), x["id"], x.get("name", ""), src(x)) for x in d.get("nests", [])],
+            markers=[Marker(x["lat"], x["lon"], x.get("kind", "marker"), float(x.get("radius_m", 0.5)),
+                            x.get("note", ""), x["id"], x.get("name", ""), src(x)) for x in d.get("markers", [])],
+            farm_settings=d.get("farm_settings") or {},
+            overlay=bool(d.get("_overlay")),
+            overlay_report=list(d.get("_overlay_report") or []),
             extra={k: v for k, v in d.items() if k not in known},
             folder=folder,
         )
 
     def save(self, folder: str) -> str:
+        if self.overlay:
+            raise RuntimeError("deze wereld bevat de aanpassingen uit farm.json; bewaar die met world.farm.save_farm "
+                               "(world.json blijft de bron)")
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, "world.json")
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
@@ -291,9 +528,55 @@ class World:
         return path
 
 
-def load_world(folder: str) -> World:
+def load_world(folder: str, overlay: bool = True) -> World:
+    """Wereld laden. Met `overlay` worden de eigen aanpassingen uit farm.json (world/farm.py) eroverheen gelegd;
+    de wereldbouwer laadt zonder, zodat world.json alleen de brondata blijft."""
     with open(os.path.join(folder, "world.json"), encoding="utf-8") as fh:
-        return World.from_dict(json.load(fh), folder=folder)
+        base = json.load(fh)
+    if overlay:
+        from openagbot_fieldsim.world.farm import apply_farm, load_farm
+        farm = load_farm(folder)
+        if farm is not None:
+            base = apply_farm(base, farm)
+    return World.from_dict(base, folder=folder)
+
+
+# Lagen die er na versie 1 bij kwamen (eigen lijst per soort, oudere bestanden hebben ze niet)
+NEW_LAYERS = ("dikes", "no_go", "zones", "passages", "nests", "markers")
+# laag -> (sleutel van de geometrie, voorvoegsel van het id)
+LAYERS = {
+    "fields": ("polygon", "veld"), "surfaces": ("polygon", "vlak"), "ditches": ("line", "sloot"),
+    "fences": ("line", "hek"), "buildings": ("footprint", "pand"), "trees": ("point", "boom"),
+    "dikes": ("line", "dijk"), "no_go": ("polygon", "verboden"), "zones": ("polygon", "zone"),
+    "passages": ("line", "doorgang"), "nests": ("point", "nest"), "markers": ("point", "marker"),
+}
+
+
+def geometry_of(layer: str, obj: dict) -> list:
+    """Punten [[lat, lon], ...] van een object (een punt-object geeft één punt)."""
+    key = LAYERS[layer][0]
+    if key == "point":
+        return [[obj["lat"], obj["lon"]]]
+    return obj[key]
+
+
+def ensure_ids(d: dict) -> None:
+    """Elk object een vast id: wat er al staat blijft, de rest krijgt een id uit zijn geometrie (op 1 cm afgerond).
+    Zo houdt een object uit PDOK hetzelfde id als de wereld opnieuw gebouwd wordt en de kaart niet veranderd is."""
+    import hashlib
+    for layer, (_, prefix) in LAYERS.items():
+        seen: set[str] = set()
+        for obj in d.get(layer, []):
+            oid = obj.get("id")
+            if not oid:
+                geom = [[round(a, 7), round(b, 7)] for a, b in geometry_of(layer, obj)]
+                oid = f"{prefix}_{hashlib.sha1(json.dumps(geom).encode()).hexdigest()[:8]}"
+            base, n = oid, 1
+            while oid in seen:
+                n += 1
+                oid = f"{base}_{n}"
+            seen.add(oid)
+            obj["id"] = oid
 
 
 def _near_line(x: float, y: float, line: list[Point], r: float) -> bool:
@@ -346,6 +629,16 @@ class SurfaceGrid:
                 nx_, ny_ = -dy / ll * r, dx / ll * r
                 paint([(a[0] + nx_, a[1] + ny_), (b[0] + nx_, b[1] + ny_), (b[0] - nx_, b[1] - ny_),
                        (a[0] - nx_, a[1] - ny_)], code["water"])
+        for p in world.passages:          # dam, duiker of brug: daar is de sloot dicht
+            if p.kind not in BRIDGING:
+                continue
+            r = p.width_m / 2.0
+            for a, b in zip(p.xy, p.xy[1:]):
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                ll = math.hypot(dx, dy) or 1.0
+                nx_, ny_ = -dy / ll * r, dx / ll * r
+                paint([(a[0] + nx_, a[1] + ny_), (b[0] + nx_, b[1] + ny_), (b[0] - nx_, b[1] - ny_),
+                       (a[0] - nx_, a[1] - ny_)], code["track"])
         self.g = g.tolist()
 
     def lookup(self, x: float, y: float):

@@ -11,8 +11,10 @@
   import MissionPanel from './components/MissionPanel.svelte';
   import PauseMenu from './components/PauseMenu.svelte';
   import PointsPanel from './components/PointsPanel.svelte';
+  import WorldEditor from './components/WorldEditor.svelte';
   import ReplayPanel from './components/ReplayPanel.svelte';
   import WorldPanel from './components/WorldPanel.svelte';
+  import { loadAerialTiles } from './lib/aerial.js';
   import { agbot, connectState, get, getTerrain, post } from './lib/api.js';
   import { CAMERA_MODES, QUALITY, World3D } from './lib/scene/world3d.js';
   import { applySettings, loadSettings, saveSettings } from './lib/settings.js';
@@ -25,7 +27,7 @@
   let st = $state.raw(null);             // live toestand van de sim
   let ab = $state.raw(null);             // status van OpenAgbot
   let connected = $state(false);
-  let screen = $state('menu');           // menu | sim
+  let screen = $state('menu');           // menu | sim | editor
   let loading = $state(true);
   let paused = $state(false);            // pauzemenu open
   let settings = $state(loadSettings());
@@ -56,7 +58,8 @@
   const tabs = [['missie', 'Missie', 'mission'], ['punten', 'Punten', 'points'], ['werktuig', 'Werktuig', 'implement'],
     ['replay', 'Replay', 'replay'], ['storingen', 'Storingen', 'fault'], ['console', 'Console', 'console'],
     ['wereld', 'Wereld', 'world']];
-  const viewToggles = [['boundaries', 'Perceelgrenzen'], ['labels', 'Veldnamen'], ['nogo', 'Sloten markeren']];
+  const viewToggles = [['boundaries', 'Perceelgrenzen'], ['labels', 'Veldnamen'], ['nogo', 'Sloten markeren'],
+    ['farm', 'Doorgangen, zones, slootzone'], ['aerial', 'Luchtfoto (PDOK)']];
 
   // Terrein in beeld op 1 m (zelfde raster als de fysica) als de wereld dat toelaat, anders grover
   function terrainCell(s) {
@@ -74,6 +77,7 @@
       scene = s;
       w3d.load(s, t.header, t.heights);
       applySettings(w3d, settings);
+      if (settings.aerial) loadAerial(s);
       mission = null; order = []; trailXY = []; lastTrailTotal = 0;
       const cat = await get('/api/implements');
       implements_ = cat.implements; implementId = cat.current;
@@ -82,6 +86,20 @@
       toast('fout', `Wereld laden mislukt: ${e.message || e}`);
     }
     loading = false;
+  }
+
+  // Luchtfoto van PDOK over de 3D-wereld (zelfde bron en cache als in de editor)
+  async function loadAerial(s = scene) {
+    if (!s || !w3d) return;
+    const xs = s.area.map((p) => p[0]), ys = s.area.map((p) => p[1]);
+    try {
+      const tiles = await loadAerialTiles(Math.min(...xs) - 30, Math.min(...ys) - 30, Math.max(...xs) + 30,
+        Math.max(...ys) + 30);
+      if (settings.aerial && scene === s) w3d.setAerial(tiles);
+    } catch (e) {
+      toast('fout', `Luchtfoto: ${e.message || e}`);
+      settings.aerial = false; saveSettings($state.snapshot(settings));
+    }
   }
 
   async function onImplement(spec) {
@@ -146,7 +164,7 @@
     if (!st?.agbot?.url || !st.agbot.running) { ab = null; return; }
     try {
       ab = await agbot(st.agbot.url, '/api/status');
-      if (ab.ab_active || mission) {
+      if (ab.ab_active || (mission && mission.kind !== 'veldmissie')) {
         const p = await get('/api/agbot/plan');
         if (p.status === 'ok' && p.versie !== planVersion) {
           planVersion = p.versie;
@@ -159,6 +177,10 @@
 
   // Handmatig rijden met de pijltjes (via de echte API, dus met dodemansknop): zolang een toets vast zit
   // stuurt de UI 10x per seconde een commando, zoals de webinterface van de robot.
+  async function refreshWorlds() {
+    try { const ws = await get('/api/worlds'); worlds = ws.worlds; currentWorld = ws.current; } catch { /* sim herstart */ }
+  }
+
   function driveTick() {
     if (screen !== 'sim' || paused || !st?.agbot?.running || !keys.size) return;
     const up = keys.has('ArrowUp') || keys.has('w'), down = keys.has('ArrowDown') || keys.has('s');
@@ -171,6 +193,7 @@
   function onKey(e, down) {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (screen === 'editor') return;          // de editor heeft zijn eigen toetsen
     if (screen === 'menu') {
       if (down && k === 'Enter' && !loading && scene) start();
       return;
@@ -197,6 +220,7 @@
     settings[key] = value;
     saveSettings($state.snapshot(settings));
     applySettings(w3d, settings, key);
+    if (key === 'aerial') { if (value) loadAerial(); else w3d.setAerial(null); }
   }
 
   function start() {
@@ -292,12 +316,15 @@
 
 {#if screen === 'menu'}
   <MainMenu {worlds} current={currentWorld} {scene} sim={st} {loading} {settings} onSet={set} onStart={start}
-    onWorld={switchWorld} />
+    onWorld={switchWorld} onEdit={() => (screen = 'editor')} />
+{:else if screen === 'editor'}
+  <WorldEditor {worlds} onClose={() => { screen = 'menu'; refreshWorlds(); }} onSaved={() => { lastEventT = null; loadWorld(); }}
+    onWorldCreated={refreshWorlds} />
 {:else}
   {#if settings.hud}
     <!-- Linksboven: waar ben ik en hoe gaat het met de robot -->
     <div class="panel tl">
-      <div class="eyebrow">{mission ? 'AB-missie' : 'Wereld'}</div>
+      <div class="eyebrow">{mission ? (mission.kind === 'veldmissie' ? 'Veldmissie' : 'AB-missie') : 'Wereld'}</div>
       <div class="title">{title ?? 'OpenAgbot FieldSim'}</div>
       <div class="chips">
         <span class="chip {statusTone}"><i></i>{status}</span>
@@ -330,7 +357,7 @@
         <div class="drawer-body">
           {#if tab === 'missie'}
             <MissionPanel {scene} bind:selected={selectedField}
-              onPlan={(p) => { mission = p; w3d.setMission(p); planVersion = null; }}
+              onPlan={(p) => { mission = p; w3d.setMission(p); planVersion = null; if (p?.kind === 'veldmissie') { order = []; w3d.setPlannedPath(null); } }}
               onStarted={() => { w3d.clearTrail(); trailXY = []; setCam('volg'); }}
               onFocus={(f) => w3d.focus(f.center[0], f.center[1], Math.sqrt(f.area_ha * 1e4) * 1.4)} />
           {:else if tab === 'wereld'}
@@ -387,6 +414,17 @@
         </div>
       {/if}
     </div>
+
+    <!-- Bewaking: robot of werktuig kwam in een verboden gebied of te dicht bij een sloot -->
+    {#if st?.geofence?.alarm && !r?.stuck}
+      <div class="panel alarm">
+        <Icon name="shield" size={22} />
+        <div><b>Gestopt door de bewaking</b><span>robot of werktuig komt in {st.geofence.alarm.text}</span></div>
+        <button onclick={() => post('/api/agbot/stop').catch(() => {})}>Stop robot</button>
+        <button onclick={() => post('/api/sim/reset', {})}>Naar startplek</button>
+        <button onclick={() => post('/api/sim/pause', { paused: false })}>Toch verder</button>
+      </div>
+    {/if}
 
     <!-- Melding als de robot vastzit -->
     {#if r?.stuck}

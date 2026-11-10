@@ -119,6 +119,7 @@ export class World3D {
 
   // ------------------------------------------------------------------ wereld opbouwen
   load(scene, terrainHeader, heights) {
+    this.setAerial(null);
     this.world.traverse((o) => o.geometry?.dispose());
     this.world.clear();
     this.overlay.clear();
@@ -203,6 +204,7 @@ export class World3D {
     add('buildings', bld);
     add('trees', trees(scene.trees));
     add('fences', fences(scene.fences, hf));
+    add('farm', this._farmLayer(scene, hf));
 
     if (!this.robot) {
       this.robot = new RobotModel(scene.robot);
@@ -213,6 +215,120 @@ export class World3D {
       wheel_left_deg: 0, wheel_right_deg: 0 });
     this._snap = true;          // eerste beeld direct achter de robot, niet vanaf de oorsprong inzwaaien
     this.setMode(this.mode === 'rond' ? 'rond' : 'volg');
+  }
+
+  // Eigen aanpassingen van de boerderij: verboden gebieden (rood), rijzones (blauw), doorgangen (groen, de enige
+  // plek over een sloot of dijk), nesten (oranje kring, vol = nu in zijn periode), markers en de kruin van dijken.
+  _farmLayer(scene, hf) {
+    const g = new THREE.Group();
+    const circle = (x, y, r, n = 40) => Array.from({ length: n }, (_, i) => [x + r * Math.cos((i / n) * 2 * Math.PI),
+      y + r * Math.sin((i / n) * 2 * Math.PI)]);
+    const post = (x, y, h, c) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, h, 10),
+        new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 }));
+      m.rotation.x = Math.PI / 2;
+      m.position.set(x, y, hf.at(x, y) + h / 2);
+      m.castShadow = true;
+      m.raycast = () => {};
+      return m;
+    };
+    const area = (poly, c, alpha) => {
+      const mat = flatDecal(c).clone();
+      mat.transparent = true; mat.opacity = alpha; mat.depthWrite = false;
+      const m = drapePolygon(poly, hf, mat, { order: ORDER.overlay, offset: 0.07 });
+      m.raycast = () => {};
+      return m;
+    };
+    const add = (o) => { if (o) g.add(o); };
+    for (const z of scene.no_go ?? []) {
+      const c = z.action === 'mijden' ? [1.0, 0.70, 0.24] : [1.0, 0.22, 0.18];
+      add(area(z.poly, c, 0.28));
+      add(ribbon(z.poly, hf, c, { closed: true, width: 0.25, px: 2.0, offset: 0.12, order: ORDER.overlay + 2 }));
+    }
+    for (const z of scene.zones ?? []) {
+      const c = z.klass === 'verboden' ? [1.0, 0.22, 0.18] : z.klass === 'werken' ? [0.49, 0.86, 0.24]
+        : z.klass === 'niet_bewerken' ? [0.71, 0.55, 1.0] : [0.31, 0.70, 1.0];
+      if (z.klass === 'verboden') add(area(z.poly, c, 0.25));
+      if (z.klass === 'niet_bewerken') add(area(z.poly, c, 0.3));
+      add(ribbon(z.poly, hf, c, { closed: true, width: 0.2, px: 1.6, offset: 0.11, dash: 1.0, order: ORDER.overlay + 2 }));
+    }
+    for (const f of scene.fields) for (const h of f.holes ?? []) {
+      add(ribbon(h.poly, hf, h.passable ? [1.0, 0.84, 0.42] : [1.0, 0.42, 0.36], { closed: true, width: 0.2, px: 1.6,
+        offset: 0.11, dash: h.passable ? 0.8 : 0, order: ORDER.overlay + 2 }));
+    }
+    for (const p of scene.passages ?? []) {
+      const band = bufferLine(p.line, p.width / 2);
+      add(area(band, [0.72, 0.89, 0.29], 0.22));
+      add(ribbon(band, hf, [0.72, 0.89, 0.29], { closed: true, width: 0.18, px: 1.8, offset: 0.12, order: ORDER.overlay + 2 }));
+      for (const q of [band[0], band[band.length - 1], band[band.length / 2 - 1], band[band.length / 2]]) {
+        if (q) g.add(post(q[0], q[1], 1.3, p.confirm ? 0xffb23e : 0xb9e34a));
+      }
+    }
+    for (const n of scene.nests ?? []) {
+      const c = [1.0, 0.70, 0.24];
+      if (n.active) add(area(circle(n.x, n.y, n.radius), c, 0.3));
+      add(ribbon(circle(n.x, n.y, n.radius), hf, c, { closed: true, width: 0.15, px: 1.6, offset: 0.12,
+        dash: n.active ? 0 : 0.6, order: ORDER.overlay + 2 }));
+      g.add(post(n.x, n.y, 1.6, 0xffb23e));
+    }
+    for (const m of scene.markers ?? []) {
+      g.add(post(m.x, m.y, 1.0, 0xffffff));
+      if (m.radius > 0) add(ribbon(circle(m.x, m.y, m.radius, 20), hf, [1, 1, 1], { closed: true, width: 0.08, px: 1.2,
+        offset: 0.1, order: ORDER.overlay + 2 }));
+    }
+    // slootzone: de verboden strook langs sloot en water (oranje rand); wie erin komt stopt
+    for (const ring of scene.ditch_zone?.rings ?? []) {
+      if (ring.length > 2) add(ribbon(ring, hf, [1.0, 0.48, 0.16], { closed: true, width: 0.22, px: 1.7, offset: 0.11,
+        maxSeg: 4, order: ORDER.overlay + 2 }));
+    }
+    for (const d of scene.dikes ?? []) {
+      add(ribbon(d.line, hf, [0.79, 0.64, 0.42], { width: 0.2, px: 1.4, offset: 0.1, order: ORDER.overlay + 1 }));
+      add(ribbon(bufferLine(d.line, d.half_base), hf, [0.79, 0.64, 0.42], { closed: true, width: 0.12, px: 1.0, offset: 0.1,
+        dash: 1.2, order: ORDER.overlay + 1 }));
+    }
+    return g;
+  }
+
+  // Luchtfoto over het terrein (zelfde tegels als in de editor): [{ img, b: { x0, y0, x1, y1 } }] in meters; null = weg.
+  setAerial(tiles) {
+    if (this._aerial) {
+      this.scene.remove(this._aerial);
+      this._aerial.traverse((o) => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
+      this._aerial = null;
+    }
+    if (!tiles?.length || !this.hf) return;
+    this._aerial = new THREE.Group();
+    for (const t of tiles) this._aerial.add(this._aerialTile(t.img, t.b));
+    this.scene.add(this._aerial);
+  }
+
+  _aerialTile(bitmap, b) {
+    const step = Math.max(1.5, Math.sqrt(((b.x1 - b.x0) * (b.y1 - b.y0)) / 40000));
+    const nx = Math.max(2, Math.ceil((b.x1 - b.x0) / step)), ny = Math.max(2, Math.ceil((b.y1 - b.y0) / step));
+    const pos = new Float32Array((nx + 1) * (ny + 1) * 3), uv = new Float32Array((nx + 1) * (ny + 1) * 2);
+    for (let j = 0, k = 0; j <= ny; j++) for (let i = 0; i <= nx; i++, k++) {
+      const x = b.x0 + ((b.x1 - b.x0) * i) / nx, y = b.y0 + ((b.y1 - b.y0) * j) / ny;
+      pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = this.hf.at(x, y) + 0.045;
+      uv[k * 2] = i / nx; uv[k * 2 + 1] = 1 - j / ny;         // bitmap: bovenkant = noord
+    }
+    const idx = [];
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const a = j * (nx + 1) + i, c = a + nx + 1;
+      idx.push(a, a + 1, c, a + 1, c + 1, c);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const tex = new THREE.CanvasTexture(bitmap);
+    tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; tex.needsUpdate = true;
+    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2 }));
+    m.receiveShadow = true;
+    m.renderOrder = ORDER.field + 8;
+    m.raycast = () => {};
+    return m;
   }
 
   setLayerVisible(name, on) {
@@ -385,6 +501,7 @@ export class World3D {
     this.overlay.clear();
     this._path = null;
     if (!plan || !this.hf) return;
+    if (plan.kind === 'veldmissie') { this._setFieldMission(plan); return; }
     for (const [a, b] of plan.swaths) {
       this.overlay.add(ribbon([a, b], this.hf, color.lines, { width: 0.07, px: 0.7, offset: 0.07, maxSeg: 4 }));
     }
@@ -397,6 +514,40 @@ export class World3D {
       this.overlay.add(m);
     }
     this.trailWidth = plan.entry?.werkbreedte_m ?? 0;
+  }
+
+  // Veldmissie: toegestaan gebied (stippel), randen per soort, rondjes/banen/bochten/overgangen in eigen kleur
+  _setFieldMission(plan) {
+    const segColor = { rondje: [0.30, 0.62, 1.0], baan: [1.0, 1.0, 1.0], bocht: [1.0, 0.62, 0.15],
+      overgang: [0.78, 0.45, 1.0], transport: [0.25, 0.9, 0.85], doorgang: [0.72, 0.89, 0.29] };
+    const edgeColor = { water: [0.2, 0.55, 1.0], weg: [0.15, 0.15, 0.15], verhard: [0.6, 0.6, 0.6],
+      hek: [0.62, 0.38, 0.18], gebouw: [0.85, 0.2, 0.2], boom: [0.2, 0.6, 0.25], perceel: [1.0, 0.82, 0.1],
+      open: [0.55, 0.85, 0.35] };
+    for (const poly of plan.allowed) {
+      for (const ring of poly) {
+        this.overlay.add(ribbon(ring, this.hf, color.boundary, { closed: true, width: 0.1, px: 1.0, offset: 0.09,
+          maxSeg: 3, dash: 0.8 }));
+      }
+    }
+    for (const e of plan.edges) {
+      this.overlay.add(ribbon(e.pts, this.hf, edgeColor[e.kind] ?? [1, 1, 1], { width: 0.35, px: 2.2, offset: 0.11,
+        maxSeg: 3, order: ORDER.overlay + 1 }));
+    }
+    for (const sg of plan.segments) {
+      const c = sg.ok ? segColor[sg.type] ?? [1, 1, 1] : [1.0, 0.15, 0.1];
+      this.overlay.add(ribbon(sg.pts, this.hf, c, { width: sg.ok ? (sg.type === 'baan' ? 0.07 : 0.06) : 0.3,
+        px: !sg.ok ? 2.6 : sg.implement === 'omlaag' ? 0.9 : sg.type === 'transport' || sg.type === 'doorgang' ? 1.3 : 0.7,
+        offset: 0.08, maxSeg: 2, dash: sg.implement === 'omhoog' ? 0.6 : 0, order: ORDER.overlay + 1 }));
+    }
+    const first = plan.segments[0]?.pts[0];
+    if (first) {
+      const m = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.3, 16),
+        new THREE.MeshStandardMaterial({ color: 0xb9e34a, emissive: 0xb9e34a, emissiveIntensity: 0.6, roughness: 0.4 }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(first[0], first[1], this.hf.at(first[0], first[1]) + 0.75);
+      this.overlay.add(m);
+    }
+    this.trailWidth = plan.settings?.work_width_m ?? 0;
   }
 
   setPlannedPath(points) {

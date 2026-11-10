@@ -15,6 +15,7 @@ hidden = (
     + collect_submodules("can.interfaces")
     + collect_submodules("uvicorn")
     + collect_submodules("websockets")
+    + collect_submodules("shapely")
     + ["fastapi.staticfiles", "fastapi.middleware.cors", "starlette.staticfiles", "pydantic", "multipart",
        "webview", "webview.platforms.edgechromium", "webview.platforms.winforms", "clr_loader", "pythonnet"]
 )

@@ -55,11 +55,25 @@ class SimApp:
             self.sim = Simulation(self.world, self.base_config, Ports(s.gnss_port, s.steering_port, s.can_port))
             if self.implement_id:
                 self.sim.set_implement(self.implement_id)
+            self.sim.on_geofence = self._on_geofence
             self.sim.start()
             self.missions.clear()
             self.settings.world = name
             if self.settings.start_agbot if start_agbot is None else start_agbot:
                 self.start_agbot()
+
+    def _on_geofence(self, violation: dict) -> None:
+        """Stop-gebied geraakt: ook de sim-robot stoppen, zodat hij na 'verder' niet doorrijdt."""
+        if self.sim is None or not self.sim.geofence.settings.get("stop_robot", True):
+            return
+
+        def stop():
+            try:
+                self.agbot_request("/api/stop", {})
+            except Exception:      # noqa: BLE001 - OpenAgbot draait niet: de sim staat al op pauze
+                pass
+
+        threading.Thread(target=stop, daemon=True, name="geofence-stop").start()
 
     def start_agbot(self) -> None:
         p = self.sim.ports

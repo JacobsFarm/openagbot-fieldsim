@@ -13,7 +13,7 @@
     let pts;
     if (mission) {
       const f = scene?.fields.find((x) => x.id === mission.field_id);
-      pts = f ? f.poly : mission.swaths.flat();
+      pts = f ? f.poly : (mission.swaths ?? mission.segments.map((sg) => sg.pts)).flat();
     } else {
       pts = scene?.area ?? [];
     }
@@ -55,7 +55,38 @@
       ctx.strokeStyle = css(color.water); ctx.lineWidth = Math.max(1.6, d.width * v.s); ctx.stroke();
     }
     if (!mission) for (const b of scene.buildings) poly(b.poly, '#d9dcdc', 'rgba(0,0,0,0.5)', 0.6);
-    if (mission) {
+    for (const z of scene.no_go ?? []) poly(z.poly, 'rgba(255,70,60,0.35)', '#ff4a3d', 1);
+    for (const z of scene.zones ?? []) if (z.klass === 'niet_bewerken') poly(z.poly, 'rgba(181,140,255,0.45)', '#b58cff', 0.8);
+    for (const ring of scene.ditch_zone?.rings ?? []) poly(ring, null, 'rgba(255,122,40,0.8)', 0.7);
+    for (const z of scene.zones ?? []) if (z.klass === 'verboden') poly(z.poly, 'rgba(255,70,60,0.3)', '#ff4a3d', 1);
+    for (const n of scene.nests ?? []) if (n.active) {
+      ctx.beginPath(); ctx.arc(v.tx(n.x), v.ty(n.y), Math.max(2.5, n.radius * v.s), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,178,62,0.45)'; ctx.fill(); ctx.strokeStyle = '#ffb23e'; ctx.lineWidth = 1; ctx.stroke();
+    }
+    for (const p of scene.passages ?? []) {
+      ctx.beginPath();
+      p.line.forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
+      ctx.strokeStyle = '#b9e34a'; ctx.lineWidth = Math.max(2, p.width * v.s); ctx.globalAlpha = 0.7; ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    if (mission?.kind === 'veldmissie') {
+      const segCol = { rondje: '#4d9eff', baan: 'rgba(255,255,255,0.75)', bocht: '#ff9f26', overgang: '#c873ff',
+        transport: '#40e6d9', doorgang: '#b9e34a' };
+      for (const poly of mission.allowed) poly[0] && (() => {
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        poly[0].forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
+        ctx.closePath(); ctx.strokeStyle = 'rgba(255,240,180,0.8)'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.setLineDash([]);
+      })();
+      for (const sg of mission.segments) {
+        ctx.beginPath();
+        sg.pts.forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
+        ctx.strokeStyle = sg.ok ? segCol[sg.type] ?? '#fff' : '#ff3b2f';
+        ctx.lineWidth = !sg.ok ? 2.2 : sg.type === 'transport' || sg.type === 'doorgang' ? 1.4
+          : sg.type === 'baan' || sg.type === 'rondje' ? 0.9 : 0.7;
+        ctx.stroke();
+      }
+    } else if (mission) {
       const w = Math.max(1, mission.entry.werkbreedte_m * v.s * 0.8);
       mission.swaths.forEach(([a, b], k) => {
         const done = doneSwaths.includes(k);

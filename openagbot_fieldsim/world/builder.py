@@ -9,6 +9,7 @@ in RD. Om RD exact naar de sim te krijgen halen we een paar BGT-objecten in beid
 afbeelding RD -> lokaal ENU toe (over een paar km is die op de millimeter; de rest-afwijking wordt gelogd).
 
   python -m openagbot_fieldsim.world.builder eigen_bedrijf
+  python -m openagbot_fieldsim.world.builder eigen_bedrijf --boundaries   (alleen Kadaster + BGT-scheidingen erbij)
 """
 from __future__ import annotations
 
@@ -21,13 +22,14 @@ from typing import Callable
 import numpy as np
 
 from openagbot_fieldsim.world.geometry import ccw, point_in_polygon, polygon_area
-from openagbot_fieldsim.world.model import Building, Field, Roof, Surface, Tree, World, load_world
+from openagbot_fieldsim.world.model import Building, Fence, Field, Roof, Surface, Tree, World, load_world
 from openagbot_fieldsim.world.sources import ahn
 from openagbot_fieldsim.world.sources.http import fetch, fetch_features, fetch_json
 from openagbot_fieldsim.world.terrain import Terrain, points_in_polygon
 
 BGT = "https://api.pdok.nl/lv/bgt/ogc/v1/collections/{c}/items?bbox={bbox}&limit=1000&f=json"
 BRP = "https://api.pdok.nl/rvo/gewaspercelen/ogc/v1/collections/brpgewas/items?bbox={bbox}&limit=1000&f=json"
+BRK = "https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1/collections/perceel/items?bbox={bbox}&limit=1000&f=json"
 BAG3D = "https://api.3dbag.nl/collections/pand/items?bbox={bbox}&limit=100"
 RD = "&crs=http://www.opengis.net/def/crs/EPSG/0/28992"
 
@@ -54,7 +56,7 @@ WATER_LEVEL_M = 0.35         # waterpeil onder het maaiveld langs de rand
 class Builder:
     def __init__(self, folder: str, progress: Callable[[str], None] | None = None):
         self.folder = folder
-        self.world = load_world(folder)
+        self.world = load_world(folder, overlay=False)     # alleen de brondata
         self.cache = os.path.join(folder, "cache")
         self.log = progress or (lambda msg: print(msg, flush=True))
         f = self.world.frame
@@ -190,6 +192,69 @@ class Builder:
         self.log(f"BRP: {len(out)} percelen (bouwland en grasland)")
         return out
 
+    # ------------------------------------------------------------------ randen: Kadaster en BGT-scheidingen
+    def _fields_from_kadaster(self, w: World) -> list[Field]:
+        """Terugval zonder BRP: kadastrale percelen waarvan het midden in grasland of bouwland (BGT) ligt."""
+        out = []
+        for k in w.extra.get("kadaster", []):
+            xy = self._xy([(lon, lat) for lat, lon in k["polygon"]])
+            if abs(polygon_area(xy)) < 500 or not self._center_in_area(xy):
+                continue
+            cx, cy = sum(p[0] for p in xy) / len(xy), sum(p[1] for p in xy) / len(xy)
+            if any(sf.kind in ("water", "road", "paved", "yard") and point_in_polygon(cx, cy, sf.xy)
+                   for sf in w.surfaces if sf.xy):
+                continue
+            n = len(out) + 1
+            out.append(Field(f"perceel_{n}", f"kadaster {k['id']}", [tuple(p) for p in k["polygon"]], ""))
+        self.log(f"geen BRP-percelen: {len(out)} velden uit het Kadaster")
+        return out
+
+    def boundaries(self) -> dict:
+        """Wat de missieplanner over de perceelranden wil weten, naast de BRP-percelen (RVO).
+
+        - `kadaster`: kadastrale percelen (BRK, eigendomsgrens; loopt bij een sloot meestal tot het midden van het
+          water, de BRP-grens ligt op de insteek). Alleen ter controle en als terugval zonder BRP.
+        - `scheidingen`: BGT scheiding_lijn (hek, damwand, walbescherming, muur, ...) als lijn met soort.
+        Hekken komen ook in `fences` (die tekent de sim).
+        """
+        kad = []
+        for g in fetch_features(BRK.format(bbox=self.ll_bbox), self.cache):
+            p = g["properties"]
+            for ring in _outer_rings(g["geometry"]):
+                xy = self._xy(ring)
+                if len(xy) >= 3 and self._in_area(xy):
+                    kad.append({"id": f"{p.get('kadastrale_gemeente_waarde', '')} {p.get('sectie', '')} "
+                                      f"{p.get('perceelnummer', '')}".strip(),
+                                "grootte_m2": p.get("kadastrale_grootte_waarde"),
+                                "polygon": [[round(a, 9), round(b, 9)] for a, b in self._ll(xy)]})
+        sch = []
+        for g in fetch_features(BGT.format(c="scheiding_lijn", bbox=self.ll_bbox), self.cache):
+            p = g["properties"]
+            if p.get("eind_registratie") or p.get("relatieve_hoogteligging", 0) not in (0, None):
+                continue
+            geom = g["geometry"]
+            lines = [geom["coordinates"]] if geom["type"] == "LineString" else (
+                geom["coordinates"] if geom["type"] == "MultiLineString" else [])
+            for line in lines:
+                xy = self._xy(line)
+                if len(xy) >= 2 and self._in_area(xy):
+                    sch.append({"type": p.get("type") or "scheiding",
+                                "line": [[round(a, 9), round(b, 9)] for a, b in self._ll(xy)]})
+        self.log(f"Kadaster: {len(kad)} percelen, BGT scheidingen: {len(sch)}")
+        return {"kadaster": kad, "scheidingen": sch}
+
+    def apply_boundaries(self, w: World) -> None:
+        b = self.boundaries()
+        w.extra["kadaster"] = b["kadaster"]
+        w.extra["scheidingen"] = b["scheidingen"]
+        w.fences = []                    # een echte wereld: hekken komen alleen uit de BGT
+        for s in b["scheidingen"]:
+            if s["type"] == "hek":
+                w.fences.append(Fence([tuple(p) for p in s["line"]], 1.2, 3.0))
+        today = datetime.date.today().isoformat()
+        w.sources["kadaster"] = {"source": "BRK kadastrale kaart, perceel (PDOK OGC API)", "downloaded": today}
+        w.sources["scheidingen"] = {"source": "BGT scheiding_lijn (PDOK OGC API)", "downloaded": today}
+
     def _center_in_area(self, xy) -> bool:
         cx = sum(p[0] for p in xy) / len(xy)
         cy = sum(p[1] for p in xy) / len(xy)
@@ -271,6 +336,11 @@ class Builder:
         w.terrain = {"type": "grid", "file": "terrain.npz", "cell_m": cell, "source": "AHN DTM 0,5 m (PDOK)"}
         w.surfaces, w.fields, w.buildings = surfaces, fields, buildings
         w.trees = []
+        w.fences = []
+        self.apply_boundaries(w)
+        if not fields:
+            fields = self._fields_from_kadaster(w)
+            w.fields = fields
         w.sources.update({k: {"source": v, "downloaded": today} for k, v in (
             ("terrain", "AHN DTM 0,5 m (PDOK WCS)"), ("surfaces", "BGT (PDOK OGC API)"),
             ("fields", "BRP gewaspercelen (PDOK OGC API)"), ("buildings", "BGT pand + 3D BAG (api.3dbag.nl)"))})
@@ -432,7 +502,12 @@ def main(argv=None):
         print(__doc__)
         return
     folder = args[0] if os.path.isdir(args[0]) else os.path.join(load_settings().worlds_dir, args[0])
-    Builder(folder).build()
+    b = Builder(folder)
+    if "--boundaries" in args:          # alleen Kadaster + BGT-scheidingen toevoegen aan een gebouwde wereld
+        b.apply_boundaries(b.world)
+        b.world.save(folder)
+        return
+    b.build()
 
 
 if __name__ == "__main__":

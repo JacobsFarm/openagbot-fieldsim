@@ -13,6 +13,18 @@ export async function post(path, body = {}) {
   return r.json();
 }
 
+export async function put(path, body = {}) {
+  const r = await fetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) });
+  if (!r.ok) {
+    const t = await r.text();
+    let msg = t;
+    try { msg = JSON.parse(t).detail ?? t; } catch { /* geen json */ }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function getTerrain(cell = 2) {
   const r = await fetch(`/api/world/terrain?cell=${cell}`);
   const header = JSON.parse(r.headers.get('X-Terrain'));

@@ -9,14 +9,15 @@ Doel: een Windows-programma (.exe) waarin je
 5. aanbouwdelen (vloeibare-kunstmeststrooier, ridderzuringboor, ...) in het veld probeert, ook met taakkaarten
    (hier meer liters, daar minder).
 
-## Stand van zaken (2026-11-09)
+## Stand van zaken (2026-11-10)
 
 | Fase | Stand |
 | --- | --- |
 | 0 Fundament | klaar: repo, venv (Python 3.12, uv), geo-module met tests |
 | 1 SIL-kern | klaar: voertuigmodel, GNSS-, stuur- en VESC-emulators, `simcan`, OpenAgbot als subproces; integratietest rijdt een AB-baan binnen 10 cm |
 | 2 Sim-UI | grotendeels: 3D in FreeCAD-stijl, panelen, minikaart, storingen, console, echte webinterface in een venster, rijden met de pijltjes. Nog niet: schermvergelijking met `field_run_simple_refill.png`, 2D-kaart met luchtfoto |
-| 3 Missies | AB per veld (opslaan in `ab_line.json`, starten, pad uit OpenAgbot getekend), punten zetten en als `waypoints.json` exporteren of naar de robot sturen, BRP-percelen in echte werelden. Nog niet: `ab_line.json` direct naar de robot (OpenAgbot heeft daar geen API voor) |
+| 3 Missies | AB per veld (opslaan in `ab_line.json`, starten, pad uit OpenAgbot getekend), punten zetten en als `waypoints.json` exporteren of naar de robot sturen, BRP-percelen in echte werelden. **Veldmissie** (hoofdstuk 5a): randen herkend (sloot, weg, hek, gebouw, buurperceel) met eigen vrije ruimte, kopakkerrondjes eerst/laatst/overslaan, banen in de beste richting, Dubins-bochten met de draaicirkel van de robot; uit als `veldmissie.json` en als `waypoints.json` die de huidige software rijdt. Nog niet: `ab_line.json` direct naar de robot, snelheid en werktuig per stuk in OpenAgbot (OpenAgbot `docs/veldmissie.md`) |
+| 3b Boerderij | (hoofdstuk 5b, uit "toe te voegen.md") `farm.json`-overlay met vaste id's; dijk, verboden gebied, rijzone, doorgang, nest, marker, gaten in velden; editor "Wereld bewerken" in het hoofdmenu; AgOpenGPS/KML/GeoJSON in en uit, gecontroleerd op 12 echte velden; planner gebruikt de nieuwe soorten; routegraaf en boerderijmissie via doorgangen; controle vooraf en bewaking in de sim; dijken in het terrein. Nog niet: luchtfoto in 3D, shapefile, Headland/TrackLines van AgOpenGPS, de geofence in OpenAgbot zelf (OpenAgbot `docs/veldmissie.md`) |
 | 4 Replay | ritlog afspelen met kerngetallen, route narijden in de sim. Nog niet: ijken van het voertuigmodel, ruwe GNSS terugspelen |
 | 5 Wereld | fantasiewereld `example` (5 velden, boerderij, sloten, reliëf) en wereldbouwer voor een echte plek (BGT, BRP, AHN, 3D BAG; `eigen_bedrijf` gebouwd). Nog niet: bomen uit BGT/TOP10NL, ontvangstmodel bij gebouwen, glb uit FreeCAD (maatverschil robot, zie README) |
 | 6 Aanbouwdelen | 3 werktuigen uit FreeCAD (messenbalk, ridderzuringboor v8, injecteur V2) met werkstand/geheven, strook, liters, boor-planten; nog niet: taakkaarten/variabele dosis, werktuigsturing vanuit OpenAgbot (stoppen bij een plant, pomp) |
@@ -297,6 +298,65 @@ Stroom:
 5. **Log-replay**: geplande lijn, gesimuleerde rit en echte rit over elkaar, met afwijking, snelheid, stuurhoek en
    motorstromen in de tijd (de CSV heeft al 60 kolommen). De verschillen gebruik je om het voertuigmodel te ijken
    (slip, stuurvertraging, heading-offset), zodat de sim steeds beter het veld voorspelt.
+
+### 5a. Veldmissie: rondjes langs de rand, dan het hart (2026-11-10)
+
+De AB-missie laat de robot zelf banen en kopakkerbochten rekenen, maar laat de kopakker en de randen onbewerkt
+en weet niet wat er naast het veld ligt. De veldmissie (`openagbot_fieldsim/missions/`) plant het hele veld zoals
+een boer het rijdt en levert één rijpad op:
+
+1. **Perceelgrens**: BRP-gewaspercelen van RVO (PDOK), zoals de boer ze zelf heeft ingetekend; ter controle en als
+   terugval het Kadaster (BRK perceel). Het Kadaster gaat bij een sloot tot het midden van het water, de BRP-lijn
+   ligt op de insteek; daarom plannen we op BRP.
+2. **Wat ligt ernaast** (`boundary.py`): de rand in stukjes van 1 m, per stukje het obstakel binnen 5 m: water (BGT
+   waterdeel, sloten, damwand, walbescherming), weg (BGT rijbaan), erf/pad, hek (BGT scheiding_lijn 'hek', muur),
+   gebouw, boom, anders buurperceel of open. Toegestaan gebied = perceel min `border_min_m` (0,2 m) min elk
+   obstakel met zijn eigen vrije ruimte (sloot 1,0 m vanaf de insteek, weg 1,0, hek 0,6, gebouw 1,5). Ligt de
+   sloot 3 m buiten de lijn, dan kost dat geen grond; is de BRP-lijn over het talud getekend, dan schuift de
+   grens vanzelf naar binnen.
+3. **Kopakker**: N rondjes (instelbaar, 0 = overslaan), werktuigrand op de grens, bolle hoeken afgerond met de
+   draaicirkel (anders haalt de robot de hoek niet; het hoekje blijft over en staat in de dekking). Valt het veld
+   bij een smalle hals uiteen, dan krijgt elk deel zijn eigen rondjes.
+4. **Hart**: rechte banen, richting met de minste tijd (alle randrichtingen en elke 5 graden, zoals Fields2Cover),
+   een halve werkbreedte de bewerkte kopakker in (geen driehoekjes bij een schuine kopakker), de einden ingekort
+   tot het hele werktuig binnen de grens valt. Bij een hoekig veld wordt het hart in vakken verdeeld.
+5. **Volgorde en bochten**: per vak heen-en-weer of 1/2/3 banen overslaan (zelfde patroon als
+   `maak_baan_volgorde` van de robot), de kortste wint, waarbij een bocht die niet past zwaar telt. Bochten zijn
+   Dubins-paden (U-bocht als de zijsprong > 2R, anders een peer/omega, zoals AgOpenGPS) en moeten met robot en
+   werktuig binnen het toegestane gebied blijven; past er een niet, dan wordt de baan aan dat eind ingekort.
+   Kopakker eerst: de robot draait op de al bewerkte kopakker. Kopakker laatst: hij draait op de onbewerkte
+   kopakker en werkt die sporen daarna weg. Overgangen tussen vakken gaan over een kopakkerring als de directe
+   weg door nog niet bewerkt gewas zou gaan.
+6. **Uit**: `veldmissie.json` (lat/lon, segmenten rondje/overgang/baan/bocht met snelheid en werktuig
+   omhoog/omlaag) en `waypoints.json` die OpenAgbot nu al rijdt (pure pursuit). Wat OpenAgbot nog mist om de
+   veldmissie volledig te rijden: OpenAgbot `docs/veldmissie.md`.
+
+Draaicirkel: OpenAgbot begrenst het binnenste voorwiel op 30 graden, dus het midden van de achteras draait om
+L / tan(30) + spoor / 2 = 2,58 m; de planner rekent met 15 % marge (2,97 m).
+
+Bekijken zonder sim: `tools/render_field_plan.py <wereld> <veld> uit.png`. Rijden met de echte software zonder UI:
+`tools/drive_field_mission.py --test-field 40x30`.
+
+### 5b. Boerderij: eigen aanpassingen, doorgangen en veiligheid (2026-11-10)
+
+Uitwerking van "toe te voegen.md". De keuzes:
+
+- **Twee bestanden.** `world.json` is brondata (PDOK), `farm.json` zijn de eigen aanpassingen. Een bronobject wordt
+  op zijn id teruggevonden en gecontroleerd met een anker (een punt in het object); BRP-percelen worden bij elke
+  bouw opnieuw genummerd, dan zoekt de overlay op het anker. Is het bronobject echt weg, dan blijft de eigen versie
+  als eigen object staan met een melding.
+- **Editor in 2D** (canvas, bovenaanzicht) in plaats van de three.js-scene met een orthografische camera: punten
+  verslepen, snappen en grepen zijn zo veel betrouwbaarder, en de luchtfoto kan er net zo goed onder. Na bewaren
+  laadt de 3D-wereld opnieuw en toont dezelfde objecten.
+- **Alleen via doorgangen.** Een veld of rijgebied (erf, pad, rijzone) verlaat de robot alleen door een doorgang.
+  Twee velden die tegen elkaar liggen zijn dus niet vanzelf verbonden. Dat is strenger dan nodig lijkt, maar het
+  maakt "de robot rijdt nooit ongemerkt de sloot in" een eigenschap van de route en niet van toeval in de kaart.
+- **Drie lagen veiligheid.** (1) De planner houdt afstand per soort obstakel. (2) Een onafhankelijke controle legt
+  de uitkomst met de volle breedte tegen de gevaren en keurt af. (3) De bewaking stopt tijdens het rijden. De echte
+  robot krijgt dezelfde gevaren als `geofence` in `veldmissie.json`.
+- **Open vragen uit het plan, zo beantwoord:** dijken staan standaard op `ontwijken` (per dijk en per missie te
+  veranderen); "stoppen" pauzeert de sim en stopt de sim-robot via zijn eigen API, voor de echte robot is het een
+  voorstel in `docs/veldmissie.md`; de import is getest op de eigen AgOpenGPS-map.
 
 ### Onkruidmissies
 

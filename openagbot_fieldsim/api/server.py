@@ -15,6 +15,7 @@
   POST /api/agbot/stop                   noodstop via de API van de robot
   GET  /api/agbot/plan                   gepland rijpad van de lopende AB-missie (uit OpenAgbot zelf)
   /api/implements...                     aanbouwdelen: zie api/implements_api.py
+  /api/fieldmission...                   veldmissies (rondjes + banen + bochten): zie api/field_api.py
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from openagbot_fieldsim.api import implements_api, points_api
+from openagbot_fieldsim.api import editor_api, farm_api, field_api, implements_api, points_api
 from openagbot_fieldsim.api.scene import scene, terrain_bytes
 from openagbot_fieldsim.app import SimApp
 from openagbot_fieldsim.missions.ab import plan_ab, save_ab_line, start_command
@@ -161,6 +162,7 @@ def create_app(sim_app: SimApp) -> FastAPI:
     @app.post("/api/world/start_pose")
     def world_start_pose(body: Reset):
         """Huidige (of opgegeven) robotpositie bewaren als startplek van deze wereld."""
+        from openagbot_fieldsim.world.farm import set_start_pose
         from openagbot_fieldsim.world.model import Pose
         sim = need_sim()
         s = sim.vehicle.s
@@ -168,8 +170,8 @@ def create_app(sim_app: SimApp) -> FastAPI:
         heading = body.heading if body.heading is not None else s.heading
         lat, lon = sim.world.frame.to_latlon(x, y)
         sim.world.start_pose = Pose(lat, lon, round(heading, 1))
-        sim.world.sources["start_pose"] = "user"
-        sim.world.save(sim.world.folder)
+        # in farm.json: een eigen aanpassing, blijft staan als de wereld opnieuw gebouwd wordt
+        set_start_pose(sim.world.folder, lat, lon, heading)
         return {"status": "ok", "start_pose": sim.world.start_pose.to_dict()}
 
     @app.post("/api/sim/pause")
@@ -310,6 +312,9 @@ def create_app(sim_app: SimApp) -> FastAPI:
         return {"status": "started", "waypoints": len(wps), "agbot": r}
 
     points_api.register(app, sim_app)
+    field_api.register(app, sim_app)
+    farm_api.register(app, sim_app)
+    editor_api.register(app, sim_app)
     implements_api.register(app, sim_app)
 
     @app.websocket("/ws")

@@ -91,6 +91,15 @@ class Simulation:
         self._booted = False
         self.loop_overrun = 0
         self.implement = None            # openagbot_fieldsim.implements.state.ImplementState of None
+        self.geofence = None             # missions.safety.Geofence: bewaakt verboden gebieden en sloten
+        self.on_geofence = None          # callback(overtreding) bij een stop (SimApp stopt dan de sim-robot)
+        self.geofence_alarm: dict | None = None
+        self._gf_tick = 0
+        try:
+            from openagbot_fieldsim.missions.safety import Geofence
+            self.geofence = Geofence(world)
+        except Exception:                # noqa: BLE001 - zonder shapely draait de sim zonder bewaking
+            log.exception("geofence niet beschikbaar")
         self.reset_pose()
 
     # ------------------------------------------------------------------ besturing
@@ -120,6 +129,11 @@ class Simulation:
                 v.erpm = 0.0
             self._prev_ant1 = None
             self.trail.clear()
+            self.geofence_alarm = None
+            if self.geofence is not None:
+                # wat de robot op de nieuwe plek al raakt telt niet als 'erin gereden' (hij is daar neergezet)
+                self.geofence.reset()
+                self.geofence.check(self._footprint())
             self._event("info", "robot geplaatst")
 
     def set_implement(self, implement_id: str | None):
@@ -128,6 +142,8 @@ class Simulation:
         from openagbot_fieldsim.implements.state import ImplementState
         with self._lock:
             self.implement = None if not implement_id else ImplementState(get(implement_id), self.params.wheelbase_m)
+            if self.geofence is not None:      # een breder werktuig kan al in een gebied steken: niet als alarm
+                self.geofence.check(self._footprint())
             self._event("info", f"werktuig: {implement_id or 'geen'}")
             return self.implement
 
@@ -152,6 +168,38 @@ class Simulation:
             if kw.get("clear_stuck"):
                 self.vehicle.s.stuck = None
             self._event("fault", ", ".join(f"{k}={v}" for k, v in kw.items() if v is not None))
+
+    def set_geofence(self, date=None, mission_dike_mode: str | None = None):
+        """Bewaking opnieuw opbouwen voor een missiedatum (nesten in hun periode) of een andere dijkmodus."""
+        from openagbot_fieldsim.missions.safety import Geofence
+        with self._lock:
+            self.geofence = Geofence(self.world, date, mission_dike_mode)
+            self.geofence.check(self._footprint())
+            self.geofence_alarm = None
+
+    def _footprint(self):
+        from openagbot_fieldsim.missions.safety import footprint_points
+        s = self.vehicle.s
+        return footprint_points(s.x, s.y, s.heading, self.params.wheelbase_m, self.params.track_width_m,
+                                self.implement)
+
+    def _check_geofence(self):
+        """Hoeken van robot en werktuig tegen de verboden gebieden; bij een stop-gebied pauzeert de sim."""
+        new = self.geofence.check(self._footprint())
+        for v in new:
+            what = f"{v['label']}{' ' + v['name'] if v['name'] and v['name'] != v['label'] else ''}"
+            if v["level"] == "stop":
+                self.geofence_alarm = {**v, "t": round(self.t, 2), "text": what}
+                self._event("geofence", f"GESTOPT: robot of werktuig komt in {what}")
+                if self.geofence.settings.get("pause", True):
+                    self.paused = True
+                if self.on_geofence is not None:
+                    try:
+                        self.on_geofence(v)
+                    except Exception:        # noqa: BLE001
+                        log.exception("on_geofence")
+            else:
+                self._event("waarschuwing", f"robot of werktuig raakt {what}")
 
     def _event(self, kind: str, text: str):
         self.events.append({"t": round(self.t, 2), "wall": time.time(), "kind": kind, "text": text})
@@ -207,6 +255,10 @@ class Simulation:
             if veh.s.stuck and not was_stuck:
                 self._event("hazard", veh.s.stuck)
             tool_w = self.implement.step(dt, veh.s) if self.implement is not None else 0.0
+            self._gf_tick += 1
+            if self.geofence is not None and self._gf_tick >= 10:      # 20 Hz: hooguit 7 cm rijden per controle
+                self._gf_tick = 0
+                self._check_geofence()
             self.battery.step(sum(max(0.0, v.input_current) for v in self.vescs.values()) + 0.6
                               + tool_w / max(30.0, vbat), dt)
             if not self.trail or math.hypot(veh.s.x - self.trail[-1][0], veh.s.y - self.trail[-1][1]) > 0.2:
@@ -282,4 +334,6 @@ class Simulation:
                           "total": len(trail)},
                 "events": list(self.events)[-20:],
                 "implement": self.implement.snapshot(strip_from) if self.implement is not None else None,
+                "geofence": None if self.geofence is None else {**self.geofence.state(),
+                                                                "alarm": self.geofence_alarm},
             }

@@ -10,6 +10,8 @@ export const DEFAULTS = {
   boundaries: true,       // perceelgrenzen
   labels: true,           // veldnamen
   nogo: false,            // rand van sloten en water markeren (daar loopt de robot vast)
+  aerial: false,          // luchtfoto (PDOK) over het terrein
+  farm: true,             // doorgangen, verboden gebieden, rijzones, nesten, markers, dijken
   hud: true,
 };
 
@@ -34,5 +36,5 @@ export function applySettings(w3d, s, only = null) {
   if (on('hour')) w3d.setHour(s.hour);
   if (on('clouds')) w3d.setClouds(s.clouds);
   if (on('edges')) w3d.setEdges(s.edges);
-  for (const k of ['boundaries', 'labels', 'nogo']) if (on(k)) w3d.setLayerVisible(k, s[k]);
+  for (const k of ['boundaries', 'labels', 'nogo', 'farm']) if (on(k)) w3d.setLayerVisible(k, s[k]);
 }

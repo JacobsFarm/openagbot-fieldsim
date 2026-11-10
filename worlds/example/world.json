@@ -216,6 +216,7 @@
   ],
   "surfaces": [
     {
+      "id": "vlak_m1",
       "kind": "road",
       "polygon": [
         [
@@ -238,6 +239,7 @@
       "name": "Polderweg"
     },
     {
+      "id": "vlak_m2",
       "kind": "yard",
       "polygon": [
         [
@@ -260,6 +262,7 @@
       "name": "Erf"
     },
     {
+      "id": "vlak_m3",
       "kind": "paved",
       "polygon": [
         [
@@ -282,6 +285,7 @@
       "name": "Inrit"
     },
     {
+      "id": "vlak_m4",
       "kind": "track",
       "polygon": [
         [
@@ -304,6 +308,7 @@
       "name": "Kavelpad noord"
     },
     {
+      "id": "vlak_m5",
       "kind": "track",
       "polygon": [
         [
@@ -326,6 +331,7 @@
       "name": "Kavelpad dwars"
     },
     {
+      "id": "vlak_m6",
       "kind": "track",
       "polygon": [
         [
@@ -348,6 +354,7 @@
       "name": "Dam zuidkavel"
     },
     {
+      "id": "vlak_m7",
       "kind": "paved",
       "polygon": [
         [
@@ -372,6 +379,7 @@
   ],
   "ditches": [
     {
+      "id": "sloot_m1",
       "line": [
         [
           51.998710232,
@@ -387,6 +395,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m2",
       "line": [
         [
           51.998710313,
@@ -402,6 +411,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m3",
       "line": [
         [
           51.998584409,
@@ -417,6 +427,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m4",
       "line": [
         [
           51.99858448,
@@ -432,6 +443,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m5",
       "line": [
         [
           51.996962238,
@@ -447,6 +459,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m6",
       "line": [
         [
           51.998759679,
@@ -470,6 +483,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m7",
       "line": [
         [
           51.998903539,
@@ -485,6 +499,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m8",
       "line": [
         [
           52.001999688,
@@ -500,6 +515,7 @@
       "water_depth_m": 0.3
     },
     {
+      "id": "sloot_m9",
       "line": [
         [
           52.001150279,
@@ -854,20 +870,20 @@
       "kind": "wall",
       "footprint": [
         [
-          51.999739366,
-          3.999563182
+          51.999739365,
+          3.999330212
         ],
         [
           51.999739366,
-          4.000145606
+          3.999854394
         ],
         [
           51.99982924,
-          4.000145606
+          3.999854394
         ],
         [
-          51.999829239,
-          3.999563181
+          51.999829238,
+          3.99933021
         ]
       ],
       "height_m": 2.2,
@@ -879,1236 +895,1414 @@
   ],
   "trees": [
     {
+      "id": "boom_m1",
       "lat": 51.998750681,
       "lon": 3.995777514,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m2",
       "lat": 51.998750687,
       "lon": 3.995952238,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m3",
       "lat": 51.998750693,
       "lon": 3.996126962,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m4",
       "lat": 51.998750698,
       "lon": 3.996301685,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m5",
       "lat": 51.998750704,
       "lon": 3.996476409,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m6",
       "lat": 51.998750709,
       "lon": 3.996651132,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m7",
       "lat": 51.998750714,
       "lon": 3.996825856,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m8",
       "lat": 51.998750718,
       "lon": 3.997000579,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m9",
       "lat": 51.998750723,
       "lon": 3.997175303,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m10",
       "lat": 51.998750727,
       "lon": 3.997350026,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m11",
       "lat": 51.998750731,
       "lon": 3.99752475,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m12",
       "lat": 51.998750734,
       "lon": 3.997699473,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m13",
       "lat": 51.998750737,
       "lon": 3.997874197,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m14",
       "lat": 51.99875074,
       "lon": 3.99804892,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m15",
       "lat": 51.998750743,
       "lon": 3.998223644,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m16",
       "lat": 51.998750746,
       "lon": 3.998398368,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m17",
       "lat": 51.998750748,
       "lon": 3.998573091,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m18",
       "lat": 51.99875075,
       "lon": 3.998747815,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m19",
       "lat": 51.998750752,
       "lon": 3.998922538,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m20",
       "lat": 51.998750753,
       "lon": 3.999097262,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m21",
       "lat": 51.998750753,
       "lon": 4.000873618,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m22",
       "lat": 51.998750752,
       "lon": 4.001048341,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m23",
       "lat": 51.99875075,
       "lon": 4.001223065,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m24",
       "lat": 51.998750748,
       "lon": 4.001397788,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m25",
       "lat": 51.998750746,
       "lon": 4.001572512,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m26",
       "lat": 51.998750744,
       "lon": 4.001747235,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m27",
       "lat": 51.998750741,
       "lon": 4.001921959,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m28",
       "lat": 51.998750738,
       "lon": 4.002096682,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m29",
       "lat": 51.998750735,
       "lon": 4.002271406,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m30",
       "lat": 51.998750731,
       "lon": 4.00244613,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m31",
       "lat": 51.998750727,
       "lon": 4.002620853,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m32",
       "lat": 51.998750723,
       "lon": 4.002795577,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m33",
       "lat": 51.998750719,
       "lon": 4.0029703,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m34",
       "lat": 51.998750715,
       "lon": 4.003145024,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m35",
       "lat": 51.99875071,
       "lon": 4.003319747,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m36",
       "lat": 51.998750705,
       "lon": 4.003494471,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m37",
       "lat": 51.998750699,
       "lon": 4.003669194,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m38",
       "lat": 51.998750694,
       "lon": 4.003843918,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m39",
       "lat": 51.998750688,
       "lon": 4.004018641,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m40",
       "lat": 51.998750682,
       "lon": 4.004193365,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m41",
       "lat": 51.998750676,
       "lon": 4.004368088,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m42",
       "lat": 51.998750669,
       "lon": 4.004542812,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m43",
       "lat": 51.998750662,
       "lon": 4.004717536,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m44",
       "lat": 51.998750655,
       "lon": 4.004892259,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m45",
       "lat": 51.998750648,
       "lon": 4.005066983,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m46",
       "lat": 51.99875064,
       "lon": 4.005241706,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m47",
       "lat": 51.998750632,
       "lon": 4.00541643,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m48",
       "lat": 51.998750624,
       "lon": 4.005591153,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m49",
       "lat": 51.998750615,
       "lon": 4.005765877,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m50",
       "lat": 51.998750607,
       "lon": 4.0059406,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m51",
       "lat": 51.998750598,
       "lon": 4.006115324,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m52",
       "lat": 51.998750589,
       "lon": 4.006290047,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m53",
       "lat": 51.998750579,
       "lon": 4.006464771,
       "height_m": 14.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m54",
       "lat": 51.99989215,
       "lon": 3.99934477,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m55",
       "lat": 51.99989215,
       "lon": 3.999475816,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m56",
       "lat": 51.999892151,
       "lon": 3.999606862,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m57",
       "lat": 51.999892151,
       "lon": 3.999737908,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
-      "lat": 51.999892152,
-      "lon": 3.999868954,
-      "height_m": 11.0,
-      "crown": "cone"
-    },
-    {
-      "lat": 51.999892152,
-      "lon": 4.0,
-      "height_m": 11.0,
-      "crown": "cone"
-    },
-    {
-      "lat": 51.999892152,
-      "lon": 4.000131046,
-      "height_m": 11.0,
-      "crown": "cone"
-    },
-    {
+      "id": "boom_m58",
       "lat": 51.999892151,
       "lon": 4.000262092,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m59",
       "lat": 51.999892151,
       "lon": 4.000393138,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m60",
       "lat": 51.99989215,
       "lon": 4.000524184,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m61",
       "lat": 51.99989215,
       "lon": 4.00065523,
       "height_m": 11.0,
       "crown": "cone"
     },
     {
+      "id": "boom_m62",
       "lat": 51.998966451,
       "lon": 3.999235581,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m63",
       "lat": 51.999047337,
       "lon": 3.999235579,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m64",
       "lat": 51.999128223,
       "lon": 3.999235578,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m65",
       "lat": 51.99920911,
       "lon": 3.999235577,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m66",
       "lat": 51.999289996,
       "lon": 3.999235575,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
-      "lat": 51.999370882,
-      "lon": 3.999235574,
-      "height_m": 12.0,
-      "crown": "ball"
-    },
-    {
+      "id": "boom_m67",
       "lat": 51.999451768,
       "lon": 3.999235573,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m68",
       "lat": 51.999532655,
       "lon": 3.999235571,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m69",
       "lat": 51.999613541,
       "lon": 3.99923557,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m70",
       "lat": 51.999694427,
       "lon": 3.999235568,
       "height_m": 12.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m71",
       "lat": 51.999101258,
       "lon": 4.001164833,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m72",
       "lat": 51.999182144,
       "lon": 4.001164835,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m73",
       "lat": 51.99926303,
       "lon": 4.001164837,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m74",
       "lat": 51.999343917,
       "lon": 4.001164839,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m75",
       "lat": 51.999424803,
       "lon": 4.001164841,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m76",
       "lat": 51.999505689,
       "lon": 4.001164843,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m77",
       "lat": 51.999586576,
       "lon": 4.001164845,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m78",
       "lat": 51.999667462,
       "lon": 4.001164847,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m79",
       "lat": 51.999748348,
       "lon": 4.001164849,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m80",
       "lat": 51.999829234,
       "lon": 4.001164852,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m81",
       "lat": 51.999910121,
       "lon": 4.001164854,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m82",
       "lat": 51.999991007,
       "lon": 4.001164856,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m83",
       "lat": 52.000071893,
       "lon": 4.001164858,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m84",
       "lat": 51.999101257,
       "lon": 4.001295876,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m85",
       "lat": 51.999182143,
       "lon": 4.001295879,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m86",
       "lat": 51.999263029,
       "lon": 4.001295881,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m87",
       "lat": 51.999343915,
       "lon": 4.001295883,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m88",
       "lat": 51.999424802,
       "lon": 4.001295886,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m89",
       "lat": 51.999505688,
       "lon": 4.001295888,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m90",
       "lat": 51.999586574,
       "lon": 4.00129589,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m91",
       "lat": 51.99966746,
       "lon": 4.001295893,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m92",
       "lat": 51.999748347,
       "lon": 4.001295895,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m93",
       "lat": 51.999829233,
       "lon": 4.001295897,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m94",
       "lat": 51.999910119,
       "lon": 4.0012959,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m95",
       "lat": 51.999991006,
       "lon": 4.001295902,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m96",
       "lat": 52.000071892,
       "lon": 4.001295904,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m97",
       "lat": 51.999101255,
       "lon": 4.00142692,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m98",
       "lat": 51.999182141,
       "lon": 4.001426923,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m99",
       "lat": 51.999263028,
       "lon": 4.001426925,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m100",
       "lat": 51.999343914,
       "lon": 4.001426928,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m101",
       "lat": 51.9994248,
       "lon": 4.00142693,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m102",
       "lat": 51.999505686,
       "lon": 4.001426933,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m103",
       "lat": 51.999586573,
       "lon": 4.001426935,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m104",
       "lat": 51.999667459,
       "lon": 4.001426938,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m105",
       "lat": 51.999748345,
       "lon": 4.001426941,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m106",
       "lat": 51.999829231,
       "lon": 4.001426943,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m107",
       "lat": 51.999910118,
       "lon": 4.001426946,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m108",
       "lat": 51.999991004,
       "lon": 4.001426948,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m109",
       "lat": 52.00007189,
       "lon": 4.001426951,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m110",
       "lat": 51.999101253,
       "lon": 4.001557964,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m111",
       "lat": 51.99918214,
       "lon": 4.001557967,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m112",
       "lat": 51.999263026,
       "lon": 4.001557969,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m113",
       "lat": 51.999343912,
       "lon": 4.001557972,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m114",
       "lat": 51.999424798,
       "lon": 4.001557975,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m115",
       "lat": 51.999505685,
       "lon": 4.001557978,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m116",
       "lat": 51.999586571,
       "lon": 4.001557981,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m117",
       "lat": 51.999667457,
       "lon": 4.001557983,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m118",
       "lat": 51.999748344,
       "lon": 4.001557986,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m119",
       "lat": 51.99982923,
       "lon": 4.001557989,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m120",
       "lat": 51.999910116,
       "lon": 4.001557992,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m121",
       "lat": 51.999991002,
       "lon": 4.001557995,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m122",
       "lat": 52.000071889,
       "lon": 4.001557997,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m123",
       "lat": 51.999101252,
       "lon": 4.001689007,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m124",
       "lat": 51.999182138,
       "lon": 4.00168901,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m125",
       "lat": 51.999263024,
       "lon": 4.001689013,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m126",
       "lat": 51.99934391,
       "lon": 4.001689017,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m127",
       "lat": 51.999424797,
       "lon": 4.00168902,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m128",
       "lat": 51.999505683,
       "lon": 4.001689023,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m129",
       "lat": 51.999586569,
       "lon": 4.001689026,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m130",
       "lat": 51.999667455,
       "lon": 4.001689029,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m131",
       "lat": 51.999748342,
       "lon": 4.001689032,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m132",
       "lat": 51.999829228,
       "lon": 4.001689035,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m133",
       "lat": 51.999910114,
       "lon": 4.001689038,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m134",
       "lat": 51.999991001,
       "lon": 4.001689041,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m135",
       "lat": 52.000071887,
       "lon": 4.001689044,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m136",
       "lat": 51.99910125,
       "lon": 4.001820051,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m137",
       "lat": 51.999182136,
       "lon": 4.001820054,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m138",
       "lat": 51.999263022,
       "lon": 4.001820058,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m139",
       "lat": 51.999343908,
       "lon": 4.001820061,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m140",
       "lat": 51.999424795,
       "lon": 4.001820064,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m141",
       "lat": 51.999505681,
       "lon": 4.001820067,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m142",
       "lat": 51.999586567,
       "lon": 4.001820071,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m143",
       "lat": 51.999667454,
       "lon": 4.001820074,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m144",
       "lat": 51.99974834,
       "lon": 4.001820077,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m145",
       "lat": 51.999829226,
       "lon": 4.001820081,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m146",
       "lat": 51.999910112,
       "lon": 4.001820084,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m147",
       "lat": 51.999990999,
       "lon": 4.001820087,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m148",
       "lat": 52.000071885,
       "lon": 4.00182009,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m149",
       "lat": 51.999101248,
       "lon": 4.001951095,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m150",
       "lat": 51.999182134,
       "lon": 4.001951098,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m151",
       "lat": 51.99926302,
       "lon": 4.001951102,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m152",
       "lat": 51.999343906,
       "lon": 4.001951105,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m153",
       "lat": 51.999424793,
       "lon": 4.001951109,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m154",
       "lat": 51.999505679,
       "lon": 4.001951112,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m155",
       "lat": 51.999586565,
       "lon": 4.001951116,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m156",
       "lat": 51.999667451,
       "lon": 4.001951119,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m157",
       "lat": 51.999748338,
       "lon": 4.001951123,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m158",
       "lat": 51.999829224,
       "lon": 4.001951126,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m159",
       "lat": 51.99991011,
       "lon": 4.00195113,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m160",
       "lat": 51.999990996,
       "lon": 4.001951133,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m161",
       "lat": 52.000071883,
       "lon": 4.001951137,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m162",
       "lat": 51.999101245,
       "lon": 4.002082138,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m163",
       "lat": 51.999182132,
       "lon": 4.002082142,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m164",
       "lat": 51.999263018,
       "lon": 4.002082146,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m165",
       "lat": 51.999343904,
       "lon": 4.00208215,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m166",
       "lat": 51.99942479,
       "lon": 4.002082153,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m167",
       "lat": 51.999505677,
       "lon": 4.002082157,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m168",
       "lat": 51.999586563,
       "lon": 4.002082161,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m169",
       "lat": 51.999667449,
       "lon": 4.002082165,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m170",
       "lat": 51.999748335,
       "lon": 4.002082168,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m171",
       "lat": 51.999829222,
       "lon": 4.002082172,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m172",
       "lat": 51.999910108,
       "lon": 4.002082176,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m173",
       "lat": 51.999990994,
       "lon": 4.00208218,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m174",
       "lat": 52.00007188,
       "lon": 4.002082183,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m175",
       "lat": 51.999101243,
       "lon": 4.002213182,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m176",
       "lat": 51.999182129,
       "lon": 4.002213186,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m177",
       "lat": 51.999263015,
       "lon": 4.00221319,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m178",
       "lat": 51.999343902,
       "lon": 4.002213194,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m179",
       "lat": 51.999424788,
       "lon": 4.002213198,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m180",
       "lat": 51.999505674,
       "lon": 4.002213202,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m181",
       "lat": 51.999586561,
       "lon": 4.002213206,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m182",
       "lat": 51.999667447,
       "lon": 4.00221321,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m183",
       "lat": 51.999748333,
       "lon": 4.002213214,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m184",
       "lat": 51.999829219,
       "lon": 4.002213218,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m185",
       "lat": 51.999910106,
       "lon": 4.002213222,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m186",
       "lat": 51.999990992,
       "lon": 4.002213226,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m187",
       "lat": 52.000071878,
       "lon": 4.00221323,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m188",
       "lat": 51.99910124,
       "lon": 4.002344226,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m189",
       "lat": 51.999182127,
       "lon": 4.00234423,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m190",
       "lat": 51.999263013,
       "lon": 4.002344234,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m191",
       "lat": 51.999343899,
       "lon": 4.002344238,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m192",
       "lat": 51.999424785,
       "lon": 4.002344243,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m193",
       "lat": 51.999505672,
       "lon": 4.002344247,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m194",
       "lat": 51.999586558,
       "lon": 4.002344251,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m195",
       "lat": 51.999667444,
       "lon": 4.002344255,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m196",
       "lat": 51.999748331,
       "lon": 4.00234426,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m197",
       "lat": 51.999829217,
       "lon": 4.002344264,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m198",
       "lat": 51.999910103,
       "lon": 4.002344268,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m199",
       "lat": 51.999990989,
       "lon": 4.002344272,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m200",
       "lat": 52.000071876,
       "lon": 4.002344276,
       "height_m": 4.5,
       "crown": "ball"
     },
     {
+      "id": "boom_m201",
       "lat": 51.998939491,
       "lon": 3.999708793,
       "height_m": 16.0,
       "crown": "ball"
     },
     {
+      "id": "boom_m202",
       "lat": 51.999119236,
       "lon": 3.9993011,
       "height_m": 15.0,
@@ -2117,6 +2311,7 @@
   ],
   "fences": [
     {
+      "id": "hek_m1",
       "line": [
         [
           51.99891247,
@@ -2139,6 +2334,7 @@
       "post_spacing_m": 4.0
     },
     {
+      "id": "hek_m2",
       "line": [
         [
           51.999281007,
@@ -2155,6 +2351,152 @@
       ],
       "height_m": 1.2,
       "post_spacing_m": 4.0
+    }
+  ],
+  "passages": [
+    {
+      "id": "hek_achterkamp",
+      "name": "Hek achterkamp",
+      "kind": "hek",
+      "line": [
+        [
+          52.001087456,
+          3.998107063
+        ],
+        [
+          52.001204291,
+          3.998107058
+        ]
+      ],
+      "width_m": 5.0,
+      "direction": "beide",
+      "max_speed_kmh": 2.0,
+      "confirm": false
+    },
+    {
+      "id": "hek_driehoek",
+      "name": "Hek driehoek",
+      "kind": "hek",
+      "line": [
+        [
+          52.00108745,
+          4.002184158
+        ],
+        [
+          52.001213274,
+          4.002184164
+        ]
+      ],
+      "width_m": 5.0,
+      "direction": "beide",
+      "max_speed_kmh": 2.0,
+      "confirm": false
+    },
+    {
+      "id": "hek_lange_akker",
+      "name": "Hek lange akker",
+      "kind": "hek",
+      "line": [
+        [
+          52.00238165,
+          4.000014561
+        ],
+        [
+          52.00238165,
+          4.000203861
+        ]
+      ],
+      "width_m": 5.0,
+      "direction": "beide",
+      "max_speed_kmh": 2.0,
+      "confirm": false
+    },
+    {
+      "id": "dam_lange_akker",
+      "name": "Dam lange akker",
+      "kind": "dam",
+      "line": [
+        [
+          52.001905317,
+          4.000873679
+        ],
+        [
+          52.002103039,
+          4.000873683
+        ]
+      ],
+      "width_m": 5.0,
+      "direction": "beide",
+      "max_speed_kmh": 2.0,
+      "confirm": false
+    },
+    {
+      "id": "dam_weide",
+      "name": "Dam weide",
+      "kind": "dam",
+      "line": [
+        [
+          51.999370883,
+          3.999315657
+        ],
+        [
+          51.99937088,
+          3.998966205
+        ]
+      ],
+      "width_m": 4.0,
+      "direction": "beide",
+      "max_speed_kmh": 2.0,
+      "confirm": false
+    },
+    {
+      "id": "oversteek_polderweg",
+      "name": "Oversteek Polderweg",
+      "kind": "oversteek",
+      "line": [
+        [
+          51.998732782,
+          4.0
+        ],
+        [
+          51.998651896,
+          4.0
+        ],
+        [
+          51.998651887,
+          4.001456026
+        ],
+        [
+          51.998490114,
+          4.001456021
+        ]
+      ],
+      "width_m": 5.0,
+      "direction": "beide",
+      "max_speed_kmh": 3.0,
+      "confirm": true
+    }
+  ],
+  "nests": [
+    {
+      "id": "nest_weide",
+      "name": "Kievitsnest weide",
+      "lat": 51.99999998,
+      "lon": 3.997815895,
+      "radius_m": 6.0,
+      "start": "03-15",
+      "end": "08-15"
+    }
+  ],
+  "markers": [
+    {
+      "id": "put_erf",
+      "name": "Put",
+      "kind": "put",
+      "lat": 51.999694428,
+      "lon": 4.000582424,
+      "radius_m": 0.5,
+      "note": "putdeksel op het erf"
     }
   ]
 }

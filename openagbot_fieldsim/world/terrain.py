@@ -7,7 +7,9 @@ Bronnen (`world.json` -> "terrain"):
   {"type": "grid", "file": "terrain.npz"}          # uit AHN, gemaakt door de wereldbouwer (x0, y0, cell, z)
 
 Sloten uit de wereld worden altijd in het raster uitgegraven, ook bij een AHN-raster (daar zitten ze al in, maar
-met 0,5 m-cellen niet scherp genoeg voor een wiel dat erin rijdt).
+met 0,5 m-cellen niet scherp genoeg voor een wiel dat erin rijdt). Dijken (world.dikes) worden erop gezet: kruin op
+hoogte, talud 1 : slope. Bij een doorgang is de sloot dicht (dam, duiker, brug) en de dijk doorgestoken (behalve bij
+een `oprit`: daar rijdt de robot over de dijk heen).
 """
 from __future__ import annotations
 
@@ -90,7 +92,29 @@ def build_terrain(world) -> Terrain:
     carve = np.zeros_like(z)
     for d in world.ditches:
         _carve_ditch(carve, gx, gy, d)
-    out = Terrain(t.x0, t.y0, t.cell, z - carve)
+    raise_ = np.zeros_like(z)
+    for d in getattr(world, "dikes", []):
+        _raise_dike(raise_, gx, gy, d)
+    deck = None
+    for p in getattr(world, "passages", []):
+        if len(p.xy) < 2:
+            continue
+        m = _corridor_mask(gx, gy, p.xy, p.width_m / 2.0)
+        if p.kind != "oprit":
+            raise_ = raise_ * (1.0 - m)          # dijk doorgestoken
+        if p.kind in ("dam", "duiker", "brug"):
+            carve = carve * (1.0 - m)            # sloot dicht
+            # water dat al in het raster zit (AHN, BGT-vlak): opvullen tot de lijn tussen de twee oevers
+            za, zb = uncarved.height(*p.xy[0]), uncarved.height(*p.xy[-1])
+            (ax, ay), (bx, by) = p.xy[0], p.xy[-1]
+            ll = (bx - ax) ** 2 + (by - ay) ** 2 or 1.0
+            tt = np.clip(((gx - ax) * (bx - ax) + (gy - ay) * (by - ay)) / ll, 0.0, 1.0)
+            level = np.where(m > 0.5, za + (zb - za) * tt, -np.inf)
+            deck = level if deck is None else np.maximum(deck, level)
+    z_out = z - carve + raise_
+    if deck is not None:
+        z_out = np.maximum(z_out, deck)
+    out = Terrain(t.x0, t.y0, t.cell, z_out)
     # Waterpeil per sloot (zelfde volgorde als world.ditches), voor de fysica en de UI
     out.ditch_levels = [ditch_water_level(uncarved.height, d) for d in world.ditches]
     return out
@@ -167,6 +191,37 @@ def _flatten(z, gx, gy, poly, edge) -> None:
     w = w * w * (3.0 - 2.0 * w)   # smoothstep
     zs = z[sel]
     z[sel] = zs + (level - zs) * w
+
+
+def _line_distance(gx, gy, line, reach):
+    """Afstand tot de lijn per cel (oneindig buiten `reach`)."""
+    dist = np.full(gx.shape, np.inf)
+    for (ax, ay), (bx, by) in zip(line, line[1:]):
+        sel = ((gx >= min(ax, bx) - reach) & (gx <= max(ax, bx) + reach)
+               & (gy >= min(ay, by) - reach) & (gy <= max(ay, by) + reach))
+        if not sel.any():
+            continue
+        px, py = gx[sel], gy[sel]
+        dx, dy = bx - ax, by - ay
+        ll = dx * dx + dy * dy or 1.0
+        t = np.clip(((px - ax) * dx + (py - ay) * dy) / ll, 0.0, 1.0)
+        dist[sel] = np.minimum(dist[sel], np.hypot(px - (ax + t * dx), py - (ay + t * dy)))
+    return dist
+
+
+def _raise_dike(raise_, gx, gy, dike) -> None:
+    """Dijkprofiel: kruin vlak op `height_m`, dan het talud naar het maaiveld (1 : slope)."""
+    half = dike.crest_width_m / 2.0
+    run = max(0.1, dike.height_m * dike.slope)
+    dist = _line_distance(gx, gy, dike.xy, half + run)
+    h = dike.height_m * np.clip((half + run - np.where(np.isfinite(dist), dist, half + run)) / run, 0.0, 1.0)
+    np.maximum(raise_, h, out=raise_)
+
+
+def _corridor_mask(gx, gy, line, half) -> np.ndarray:
+    """1 in de doorgang, 0 erbuiten, met een zachte rand van een halve meter."""
+    dist = _line_distance(gx, gy, line, half + 0.6)
+    return np.clip((half + 0.5 - np.where(np.isfinite(dist), dist, half + 1.0)) / 0.5, 0.0, 1.0)
 
 
 def _carve_ditch(carve, gx, gy, ditch) -> None:

@@ -12,7 +12,8 @@ import os
 
 from openagbot_fieldsim.geo import LocalFrame
 from openagbot_fieldsim.world.geometry import circle, rectangle
-from openagbot_fieldsim.world.model import Building, Ditch, Fence, Field, Pose, Roof, Surface, Tree, World
+from openagbot_fieldsim.world.model import (Building, Ditch, Fence, Field, Marker, Nest, Passage, Pose, Roof, Surface,
+                                            Tree, World)
 
 ORIGIN = (52.0, 4.0, 0.0)
 
@@ -68,7 +69,7 @@ def build() -> World:
         Building("lean_to", "Kapschuur", "shed", ll(rectangle(25, -108, 12, 8)), 3.5, Roof("flat")),
         Building("manure_silo", "Mestsilo", "silo", ll(circle(38, -95, 8.0, 32)), 4.0, Roof("flat")),
         Building("feed_silo", "Voersilo", "silo", ll(circle(-8, -92, 2.0, 16)), 11.0, Roof("cone", 12.5)),
-        Building("bunker", "Sleufsilo", "wall", ll(rectangle(-10, -24, 40, 10)), 2.2, Roof("flat")),
+        Building("bunker", "Sleufsilo", "wall", ll(rectangle(-28, -24, 36, 10)), 2.2, Roof("flat")),   # naast het pad
     ]
 
     # ---------------------------------------------------------------- bomen
@@ -82,10 +83,12 @@ def build() -> World:
         tree(x, -139.0, 14.0)
     for x in range(60, 450, 12):
         tree(x, -139.0, 14.0)
-    for x in range(-45, 46, 9):                    # erfbeplanting achter de stal
-        tree(x, -12.0, 11.0, "cone")
-    for y in range(-115, -30, 9):                  # bomenrij tussen erf en sloot langs de weide
-        tree(-52.5, y, 12.0)
+    for x in range(-45, 46, 9):                    # erfbeplanting achter de stal, met een opening voor het kavelpad
+        if abs(x) > 12:
+            tree(x, -12.0, 11.0, "cone")
+    for y in range(-115, -30, 9):                  # bomenrij tussen erf en sloot langs de weide (niet bij de dam)
+        if y != -70:
+            tree(-52.5, y, 12.0)
     for ix in range(10):                           # boomgaard oost van het erf
         for iy in range(13):
             tree(80.0 + ix * 9.0, -100.0 + iy * 9.0, 4.5)
@@ -95,6 +98,26 @@ def build() -> World:
     # ---------------------------------------------------------------- afrastering om de weide
     fences = [Fence(ll([(-256, -121), (-256, 102), (-66, 102), (-66, -60)]), 1.2, 4.0),
               Fence(ll([(-66, -80), (-66, -121), (-256, -121)]), 1.2, 4.0)]
+
+    # ---------------------------------------------------------------- doorgangen: de enige plekken om een veld op
+    # te komen. De rijlijn loopt van binnen het ene gebied tot binnen het andere.
+    def passage(name, kind, pts, width, **kw):
+        return Passage(ll(pts), width, kind, id=name.lower().replace(" ", "_"), name=name, **kw)
+
+    passages = [
+        passage("Hek achterkamp", "hek", [(-130, 121), (-130, 134)], 5.0),
+        passage("Hek driehoek", "hek", [(150, 121), (150, 135)], 5.0),
+        passage("Hek lange akker", "hek", [(1, 265), (14, 265)], 5.0),
+        passage("Dam lange akker", "dam", [(60, 212), (60, 234)], 5.0),          # over de sloot tussen de velden
+        passage("Dam weide", "dam", [(-47, -70), (-71, -70)], 4.0),              # over de sloot, door het hek
+        # over de openbare weg: eerst stoppen en wachten op vrijgave, dan langs de weg naar de dam
+        passage("Oversteek Polderweg", "oversteek", [(0, -141), (0, -150), (100, -150), (100, -168)], 5.0,
+                confirm=True, max_speed_kmh=3.0),
+    ]
+    lat, lon = f.to_latlon(-150, 0)
+    nests = [Nest(lat, lon, 6.0, "03-15", "08-15", "nest_weide", "Kievitsnest weide")]
+    lat, lon = f.to_latlon(40, -34)
+    markers = [Marker(lat, lon, "put", 0.5, "putdeksel op het erf", "put_erf", "Put")]
 
     # ---------------------------------------------------------------- reliëf
     terrain = {
@@ -126,7 +149,10 @@ def build() -> World:
         trees=trees,
         ditches=ditches,
         fences=fences,
-        start_pose=Pose(lat, lon, 90.0),
+        passages=passages,
+        nests=nests,
+        markers=markers,
+        start_pose=Pose(*f.to_latlon(-40, -38), 90.0),
         sources={"generator": "openagbot_fieldsim.world.fantasy", "note": "verzonnen wereld, geen echte plek"},
     )
 

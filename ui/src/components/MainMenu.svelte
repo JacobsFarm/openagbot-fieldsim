@@ -4,7 +4,8 @@
   import Icon from './Icon.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
 
-  let { worlds = [], current = '', scene = null, sim = null, loading = false, settings, onSet, onStart, onWorld } = $props();
+  let { worlds = [], current = '', scene = null, sim = null, loading = false, settings, onSet, onStart, onWorld,
+    onEdit } = $props();
   let view = $state('wereld');           // rechterkolom: wereld | instellingen | besturing
 
   const world = $derived(worlds.find((w) => w.name === current));
@@ -29,6 +30,10 @@
       <button class="go" onclick={onStart} disabled={loading || !scene}>
         <Icon name="play" size={22} />
         <span><b>Start simulatie</b><small>{world?.label ?? '...'}</small></span>
+      </button>
+      <button class="item" onclick={onEdit} disabled={loading || !scene}
+        title="Velden, sloten, dijken, doorgangen, verboden gebieden en nesten tekenen; AgOpenGPS inlezen">
+        <Icon name="edit" /><span>Wereld bewerken</span><Icon name="arrow" size={16} />
       </button>
       {#each items as [k, label, icon]}
         <button class="item" class:active={view === k} onclick={() => (view = k)}>
@@ -63,6 +68,12 @@
           <div><b class="num">{hectares}</b><span>hectare</span></div>
           <div><b class="num">{scene.ditches.length + scene.surfaces.filter((s) => s.kind === 'water').length}</b><span>sloten en water</span></div>
           <div><b class="num">{scene.buildings.length}</b><span>gebouwen</span></div>
+        </div>
+        <div class="stats">
+          <div><b class="num">{scene.passages?.length ?? 0}</b><span>doorgangen</span></div>
+          <div><b class="num">{(scene.no_go?.length ?? 0) + (scene.zones?.filter((z) => z.klass === 'verboden').length ?? 0)}</b><span>verboden gebieden</span></div>
+          <div><b class="num">{scene.dikes?.length ?? 0}</b><span>dijken</span></div>
+          <div><b class="num">{scene.nests?.length ?? 0}</b><span>nesten</span></div>
         </div>
       {/if}
       <div class="tiny muted">Een eigen plek toevoegen (kaarten van PDOK, AHN en 3D BAG) kan in de sim onder Wereld.</div>
@@ -99,6 +110,7 @@
   nav button:nth-child(2) { animation-delay: 0.05s; }
   nav button:nth-child(3) { animation-delay: 0.1s; }
   nav button:nth-child(4) { animation-delay: 0.15s; }
+  nav button:nth-child(5) { animation-delay: 0.2s; }
   nav button span { flex: 1; }
   nav .item:hover, nav .item.active { transform: translateX(6px); }
   nav .go { min-height: 72px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); margin-bottom: 10px; }
@@ -125,6 +137,7 @@
   .card b { font-size: 15.5px; font-weight: 600; }
   .card small { color: var(--muted); font-size: 12.5px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0 12px; }
+  .stats + .stats { margin-top: -4px; }
   .stats div { display: flex; flex-direction: column; padding: 8px 10px; background: var(--well); border-radius: 6px;
     border: 1px solid var(--line); }
   .stats b { font-family: var(--display); font-size: 26px; font-weight: 600; line-height: 1.1; }

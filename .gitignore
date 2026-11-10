@@ -24,3 +24,10 @@ settings.json
 # Lokaal
 .claude/
 start_simworld.bat
+
+# Eigen aanpassingen op de voorbeeldwereld (editor): lokaal, niet in git
+worlds/example/farm.json
+worlds/example/backups/
+worlds/example/cache/
+worlds/example/missions/veldmissie_*.json
+!worlds/example/missions/veldmissie_driehoek.json
