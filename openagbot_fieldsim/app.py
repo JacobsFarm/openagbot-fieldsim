@@ -77,7 +77,32 @@ class SimApp:
 
     def start_agbot(self) -> None:
         p = self.sim.ports
+        self.write_kaart()
         self.agbot.start(runtime_config(self.base_config, p.gnss, p.steering, p.can))
+
+    def kaart(self) -> dict:
+        """Veiligheidskaart van de geladen wereld (openagbot.kaart), zoals hij naar de robot gaat."""
+        from openagbot_fieldsim.missions.safety import kaart_export
+        return kaart_export(self.world)
+
+    def write_kaart(self) -> None:
+        """data/kaart.json van de sim-robot: zijn eigen geofence bewaakt dan ook handmatig rijden in de sim.
+        Een oude kaart van een andere wereld gaat weg, ook als de nieuwe niet te maken is."""
+        path = os.path.join(self.agbot.data_dir, "kaart.json")
+        try:
+            os.makedirs(self.agbot.data_dir, exist_ok=True)
+            if os.path.exists(path):
+                os.remove(path)
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(self.kaart(), fh, ensure_ascii=False)
+        except Exception:      # noqa: BLE001 - zonder kaart rijdt de sim-robot zonder eigen geofence
+            log.exception("kaart.json voor de sim-robot")
+
+    def send_to_agbot(self, name: str | None = None, mission: dict | None = None,
+                      waypoints: list | None = None) -> dict:
+        """Kaart (altijd de actuele), missie en waypoints naar de sim-robot."""
+        from openagbot_fieldsim.agbot import robot_link
+        return robot_link.send(self.agbot.url, self.kaart(), name, mission, waypoints)
 
     def restart_agbot(self) -> None:
         self.agbot.stop()

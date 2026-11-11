@@ -292,11 +292,15 @@
   const status = $derived(
     r?.stuck ? `vast: ${r.stuck}`
       : ab?.ab_active ? (ab.ab_message || ab.ab_state)
+        : ab?.missie_actief ? (ab.missie_message || ab.missie_state)
         : ab?.navigator_active ? (ab.nav_message || ab.nav_state)
+        : ab?.geofence && (!ab.geofence.vooruit || !ab.geofence.achteruit) ? `geofence van de robot: ${ab.geofence.reden}`
+        : ab?.missie_state === 'FOUT' ? ab.missie_message
           : ab ? (ab.drive_fault ? `aandrijving: ${ab.drive_fault}` : (Math.abs(r?.speed_kmh ?? 0) > 0.2 ? 'rijdt handmatig' : 'staat stil'))
             : st?.agbot?.running ? 'OpenAgbot start op...' : 'OpenAgbot draait niet'
   );
-  const statusTone = $derived(r?.stuck || ab?.drive_fault ? 'bad' : ab?.ab_active || ab?.navigator_active ? 'go'
+  const statusTone = $derived(r?.stuck || ab?.drive_fault || (ab?.geofence && !ab.geofence.vooruit) ? 'bad'
+    : ab?.ab_active || ab?.navigator_active || ab?.missie_actief ? 'go'
     : ab ? 'idle' : 'warn');
   const gnssTone = $derived(!st?.gnss?.connected ? 'bad' : st.gnss.quality === 4 ? 'go' : st.gnss.quality ? 'warn' : 'bad');
   const currentIdx = $derived(ab?.ab_active ? Math.max(0, (ab.ab_baan_nr ?? 1) - 1) : -1);

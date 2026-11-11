@@ -42,7 +42,7 @@
     if (!plan) return;
     busy = true; msg = 'starten...';
     try {
-      const r = await post('/api/farm/drive', { force });
+      const r = await post('/api/farm/drive', { force, mode: 'missie' });
       onStarted?.(r);
       msg = `rijdt: ${r.waypoints} waypoints`;
     } catch (err) { msg = clean(err); }
@@ -53,6 +53,21 @@
     const t = String(err.message || err);
     const m = t.match(/"detail":"(.*)"\}$/);
     return m ? m[1] : t;
+  }
+
+  let robotUrl = $state(localStorage.getItem('fieldsim.robotUrl') ?? 'http://192.168.4.1:8000');
+
+  async function push() {
+    if (!plan) return;
+    try { localStorage.setItem('fieldsim.robotUrl', robotUrl); } catch {}
+    busy = true; msg = `naar ${robotUrl}...`;
+    try {
+      const r = await post('/api/farm/push', { robot_url: robotUrl });
+      msg = r.old_software
+        ? `${r.sent} waypoints naar de robot (${r.at}). De software daar kent nog geen missies en kaart.`
+        : `kaart en missie '${r.mission}' staan op de robot (${r.at}); starten doe je daar, tabblad Veldmissie`;
+    } catch (err) { msg = String(err.message || err); }
+    busy = false;
   }
 
   async function stop() {
@@ -126,16 +141,23 @@
   <div class="sub">Naar de robot</div>
   <div class="row">
     <a class="btn" href="/api/farm/veldmissie.json" download>veldmissie.json</a>
+    <a class="btn" href="/api/safety/kaart.json" download>kaart.json</a>
     <a class="btn" href="/api/farm/waypoints.json" download>waypoints.json</a>
   </div>
+  <div class="row" style="margin-top:6px">
+    <input class="grow" type="text" bind:value={robotUrl} />
+    <button onclick={push} disabled={busy} title="Zet kaart, missie en waypoints op de robot; start niets">Stuur</button>
+  </div>
   <div class="tiny muted" style="margin-top:6px">
-    veldmissie.json (v2) bevat per stuk de snelheid, werktuig omhoog/omlaag, de doorgangen en de geofence. De huidige
-    robotsoftware rijdt de waypoints; stoppen bij een doorgang of geofence vraagt de aanpassing uit docs/veldmissie.md.
+    veldmissie.json (v2) bevat per stuk de snelheid, werktuig omhoog/omlaag, de doorgangen en de geofence; de robot
+    rijdt hem in het tabblad Veldmissie en wacht bij een oversteek op vrijgave. kaart.json = alle sloten en verboden
+    gebieden: daar stopt de robot altijd voor, ook bij handmatig rijden.
   </div>
 {/if}
 
 <style>
   .sec { font-weight: 700; margin: 0 0 4px; }
+  .grow { flex: 1; min-width: 0; }
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; max-height: 150px; overflow: auto; margin-bottom: 8px; }
   .chk { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink); }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }

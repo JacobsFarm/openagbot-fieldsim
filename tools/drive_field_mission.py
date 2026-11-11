@@ -4,8 +4,9 @@
   .venv\\Scripts\\python tools\\drive_field_mission.py --world example --field driehoek --minutes 10
 
 `--test-field BxL` maakt een tijdelijke wereld met één rechthoekig veld (sloot langs de lange zijde, hek langs een
-korte), zodat een hele missie in een paar minuten past. De robot rijdt de missie als waypoints met pure pursuit
-(wat de huidige robotsoftware kan). Uitvoer: afwijking van het geplande pad per soort segment (rondje, baan,
+korte), zodat een hele missie in een paar minuten past. `--mode missie` (standaard): de robot krijgt kaart.json en
+de veldmissie en rijdt hem met zijn eigen missievolger en geofence. `--mode waypoints`: als waypoints met pure
+pursuit van punt naar punt (de oude manier, om te vergelijken). Uitvoer: afwijking van het geplande pad per soort segment (rondje, baan,
 bocht, overgang), hoeveel van de route gereden is, en of de robot ergens buiten het toegestane gebied kwam.
 """
 from __future__ import annotations
@@ -24,7 +25,8 @@ sys.path.insert(0, ROOT)
 
 from shapely.geometry import LineString, Point  # noqa: E402
 
-from openagbot_fieldsim.missions.field_plan import plan_field, to_waypoints  # noqa: E402
+from openagbot_fieldsim.agbot import robot_link  # noqa: E402
+from openagbot_fieldsim.missions.field_plan import plan_field, to_veldmissie, to_waypoints  # noqa: E402
 
 
 def free_port():
@@ -66,6 +68,7 @@ def main(argv=None):
     ap.add_argument("--settings", default="{}")
     ap.add_argument("--minutes", type=float, default=15.0)
     ap.add_argument("--lookahead", type=float, default=2.0)
+    ap.add_argument("--mode", choices=("missie", "waypoints"), default="missie")
     ap.add_argument("--out", default=None)
     ap.add_argument("--agbot-dir", default=os.environ.get("FIELDSIM_AGBOT_DIR", r"F:\Agbot\Bruut_OpenAgbot"))
     a = ap.parse_args(argv)
@@ -101,16 +104,20 @@ def main(argv=None):
         segs = plan["segments"]
         print(f"plan: {len(segs)} segmenten, {len(wps)} waypoints, {plan['stats']['length_m']} m, "
               f"dekking {plan['stats']['coverage_allowed_pct']} %, waarschuwingen {plan['warnings']}", flush=True)
-        with open(os.path.join(app.agbot.data_dir, "waypoints.json"), "w", encoding="utf-8") as fh:
-            json.dump(wps, fh)
+        sent = app.send_to_agbot("testmissie", to_veldmissie(plan, sim.world, field_id), wps)
+        print("naar de robot:", json.dumps(sent, ensure_ascii=True), flush=True)
         x0, y0, th = segs[0].pts[0]
         h = (90.0 - math.degrees(th)) % 360.0
         sim.reset_pose(x0 - 2.0 * math.sin(math.radians(h)), y0 - 2.0 * math.cos(math.radians(h)), h)
         time.sleep(1.5)
         speed = plan["settings"]["speed_kmh"]
-        r = app.agbot_request("/api/nav/start_pure_pursuit", {"target_speed_kmh": speed,
-                                                               "lookahead_distance": a.lookahead, "gain": 1.0})
+        if a.mode == "missie":
+            r = robot_link.start_mission(app.agbot.url, "testmissie").get("status")
+        else:
+            r = app.agbot_request("/api/nav/start_pure_pursuit", {"target_speed_kmh": speed,
+                                                                   "lookahead_distance": a.lookahead, "gain": 1.0})
         print("start:", r, flush=True)
+        result["mode"] = a.mode
 
         # Gepland pad per segment als lijnen, om de afwijking per soort te meten
         lines = [(sg.type, LineString([(p[0], p[1]) for p in sg.pts])) for sg in segs if len(sg.pts) >= 2]
@@ -145,8 +152,15 @@ def main(argv=None):
                 nav = {}
             if time.time() - last_print > 20:
                 last_print = time.time()
-                print(f"{progress_s:7.1f}/{full.length:.0f} m  {nav.get('nav_state', nav.get('state', ''))}", flush=True)
+                print(f"{progress_s:7.1f}/{full.length:.0f} m  "
+                      f"{nav.get('missie_state') if a.mode == 'missie' else nav.get('nav_state', '')}  "
+                      f"{(nav.get('missie_message') if a.mode == 'missie' else nav.get('nav_message')) or ''}  "
+                      f"geofence {(nav.get('geofence') or {}).get('toestand')}", flush=True)
             if progress_s > full.length - 2.0 and abs(st.v) < 0.05:
+                break
+            if a.mode == "missie" and nav.get("missie_state") in ("FOUT", "KLAAR") and abs(st.v) < 0.05:
+                result["end_state"] = nav.get("missie_state")
+                result["end_message"] = nav.get("missie_message")
                 break
             time.sleep(0.2)
         app.agbot_request("/api/stop", {})
@@ -165,6 +179,10 @@ def main(argv=None):
             "warnings": plan["warnings"],
             "agbot_log_tail": app.agbot.status()["log"][-8:],
         })
+        try:
+            result["geofence"] = app.agbot_request("/api/geofence")
+        except Exception:      # noqa: BLE001 - oude robotsoftware
+            pass
     finally:
         app.shutdown()
     txt = json.dumps(result, indent=1, ensure_ascii=False)

@@ -4,8 +4,10 @@
   GET  /api/fieldmission/{field}                     laatst geplande missie van dat veld
   GET  /api/fieldmission/{field}/veldmissie.json     missiebestand (lat/lon, segmenten met snelheid en werktuig)
   GET  /api/fieldmission/{field}/waypoints.json      zelfde route als waypoints voor de huidige robotsoftware
-  POST /api/fieldmission/drive {field, ...}          in de sim rijden met de echte OpenAgbot (waypoints + pure pursuit)
-  POST /api/fieldmission/push {field, robot_url}     waypoints naar de ECHTE robot (start niets)
+  POST /api/fieldmission/drive {field, mode, ...}    in de sim rijden met de echte OpenAgbot: mode 'missie' (de
+                                                     missievolger van de robot, met zijn eigen geofence) of
+                                                     'waypoints' (pure pursuit van punt naar punt)
+  POST /api/fieldmission/push {field, robot_url}     kaart, missie en waypoints naar de ECHTE robot (start niets)
   GET  /api/fieldmission/boundaries/{field}          randen van het perceel: wat ligt ernaast, hoeveel ruimte
 """
 from __future__ import annotations
@@ -14,12 +16,12 @@ import json
 import math
 import os
 import time
-import urllib.request
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from openagbot_fieldsim.agbot import robot_link
 from openagbot_fieldsim.missions.boundary import edge_summary, field_area
 from openagbot_fieldsim.missions.field_plan import PlanSettings, plan_field, plan_view, to_veldmissie, to_waypoints
 
@@ -35,6 +37,7 @@ class DriveBody(BaseModel):
     lookahead_m: float = 2.0
     place_robot: bool = True
     force: bool = False                  # ook rijden als de veiligheidscontrole de route afkeurt
+    mode: str = "missie"                 # missie = missievolger van de robot | waypoints = punt naar punt
 
 
 class PushBody(BaseModel):
@@ -117,13 +120,16 @@ def register(app: FastAPI, sim_app) -> None:
         from openagbot_fieldsim.api.farm_api import refuse_unsafe
         c = get_plan(body.field)
         refuse_unsafe(c["plan"], body.force)
-        wps = to_waypoints(c["plan"], world())
+        w = world()
+        wps = to_waypoints(c["plan"], w)
+        name = robot_link.mission_name(f"veld_{body.field}")
+        mission = to_veldmissie(c["plan"], w, w.field_by_id(body.field).name)
         if sim_app.sim is not None:      # bewaking voor de datum van deze missie (nesten in hun periode)
             sim_app.sim.set_geofence(c["plan"]["settings"].get("date"), c["plan"]["settings"].get("dike_mode"))
-        data_dir = sim_app.agbot.data_dir
-        os.makedirs(data_dir, exist_ok=True)
-        with open(os.path.join(data_dir, "waypoints.json"), "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(wps, fh, indent=1)
+        try:
+            sent = sim_app.send_to_agbot(name, None if body.force else mission, wps)
+        except Exception as e:
+            raise HTTPException(502, f"OpenAgbot antwoordt niet: {e}")
         if body.place_robot and sim_app.sim is not None:
             seg = c["plan"]["segments"][0]
             x0, y0, th = seg.pts[0]
@@ -133,36 +139,38 @@ def register(app: FastAPI, sim_app) -> None:
             sim_app.sim.vehicle.s.stuck = None
             time.sleep(0.6)
         speed = body.speed_kmh or c["plan"]["settings"]["speed_kmh"]
+        # Een afgekeurde route (force) rijdt als waypoints: de missievolger van de robot weigert hem terecht.
+        mode = "waypoints" if (body.mode != "missie" or body.force or sent.get("old_software")) else "missie"
         try:
-            r = sim_app.agbot_request("/api/nav/start_pure_pursuit", {"target_speed_kmh": speed,
-                                                                       "lookahead_distance": body.lookahead_m,
-                                                                       "gain": 1.0})
+            if mode == "missie":
+                r = robot_link.start_mission(sim_app.agbot.url, name, max_kmh=body.speed_kmh)
+            else:
+                r = sim_app.agbot_request("/api/nav/start_pure_pursuit", {"target_speed_kmh": speed,
+                                                                           "lookahead_distance": body.lookahead_m,
+                                                                           "gain": 1.0})
+        except RuntimeError as e:
+            raise HTTPException(409, f"de robot start de missie niet: {e}")
         except Exception as e:
             raise HTTPException(502, f"OpenAgbot antwoordt niet: {e}")
-        return {"status": "started", "waypoints": len(wps), "agbot": r}
+        return {"status": "started", "mode": mode, "mission": name, "waypoints": len(wps), "agbot": r}
 
     @app.post("/api/fieldmission/push")
     def push(body: PushBody):
-        """Naar de ECHTE robot: waypoints vervangen. Start niets; rijden doe je op de robot zelf."""
+        """Naar de ECHTE robot: de kaart (geofence, geldt daar altijd), de missie en dezelfde route als
+        waypoints. Start niets; rijden doe je op de robot zelf (tabblad Veldmissie)."""
         from openagbot_fieldsim.api.farm_api import refuse_unsafe
         c = get_plan(body.field)
         refuse_unsafe(c["plan"], False)      # een afgekeurde route gaat niet naar de echte robot
         url = body.robot_url.rstrip("/")
         if not url.startswith(("http://", "https://")):
             raise HTTPException(400, "robot-adres moet met http:// beginnen, bv. http://192.168.4.1:8000")
-        wps = to_waypoints(c["plan"], world())
-
-        def call(method, p, data=None):
-            req = urllib.request.Request(url + p, method=method, headers={"Content-Type": "application/json"},
-                                         data=None if data is None else json.dumps(data).encode("utf-8"))
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return json.loads(r.read().decode("utf-8"))
-
+        w = world()
+        wps = to_waypoints(c["plan"], w)
+        name = robot_link.mission_name(f"veld_{body.field}")
         try:
-            call("DELETE", "/api/waypoints")
-            for wp in wps:
-                call("POST", "/api/waypoints", wp)
-            got = call("GET", "/api/waypoints")
+            sent = robot_link.send(url, sim_app.kaart(), name,
+                                   to_veldmissie(c["plan"], w, w.field_by_id(body.field).name), wps)
         except Exception as e:
             raise HTTPException(502, f"robot op {url} niet bereikbaar of weigert: {e}")
-        return {"status": "ok", "sent": len(wps), "robot_has": len(got), "at": time.strftime("%H:%M:%S")}
+        return {"status": "ok", "sent": len(wps), "robot_has": sent.get("waypoints"), "mission": name,
+                "kaart": sent.get("kaart"), "old_software": sent["old_software"], "at": time.strftime("%H:%M:%S")}

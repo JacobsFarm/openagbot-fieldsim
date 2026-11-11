@@ -1,7 +1,7 @@
 <script>
   // Veldmissie: kopakkerrondjes langs de rand, dan het hart in rechte banen (of andersom), met bochten die de robot
-  // echt kan rijden. Afstand tot sloot, weg en hek per soort. Rijden in de sim gaat als waypoint-route met de echte
-  // robotsoftware; dezelfde route kan als bestand mee of direct naar de robot.
+  // echt kan rijden. Afstand tot sloot, weg en hek per soort. Rijden in de sim doet de echte robotsoftware met zijn
+  // missievolger en zijn eigen geofence (kaart.json); missie en kaart kunnen als bestand mee of direct naar de robot.
   import { post } from '../lib/api.js';
 
   let { scene = null, selected = null, onPlan, onStarted } = $props();
@@ -30,6 +30,7 @@
   let busy = $state(false);
   let msg = $state('');
   let plan = $state.raw(null);
+  let mode = $state('missie');           // missie = missievolger van de robot | waypoints = punt naar punt (oud)
 
   const kindLabel = { water: 'sloot', weg: 'weg', verhard: 'erf/pad', hek: 'hek', gebouw: 'gebouw', boom: 'boom',
     perceel: 'buurperceel', open: 'open', dijk: 'dijk', verboden: 'verboden gebied', nest: 'nest', gat: 'gat',
@@ -63,9 +64,11 @@
     if (!plan) return;
     busy = true; msg = 'starten...';
     try {
-      const r = await post('/api/fieldmission/drive', { field: selected, place_robot: true, force });
+      const r = await post('/api/fieldmission/drive', { field: selected, place_robot: true, force, mode });
       onStarted?.(r);
-      msg = r.agbot?.status === 'success' || r.status === 'started' ? `rijdt: ${r.waypoints} waypoints` : JSON.stringify(r.agbot);
+      msg = r.status !== 'started' ? JSON.stringify(r.agbot)
+        : r.mode === 'missie' ? `rijdt: missie '${r.mission}' met de missievolger en geofence van de robot`
+          : `rijdt: ${r.waypoints} waypoints (punt naar punt)`;
     } catch (err) { msg = String(err.message || err); }
     busy = false;
   }
@@ -76,7 +79,9 @@
     busy = true; msg = `naar ${robotUrl}...`;
     try {
       const r = await post('/api/fieldmission/push', { field: selected, robot_url: robotUrl });
-      msg = `${r.sent} waypoints naar de robot (${r.at}); starten doe je op de robot zelf`;
+      msg = r.old_software
+        ? `${r.sent} waypoints naar de robot (${r.at}). De software daar kent nog geen missies en kaart: werk OpenAgbot bij.`
+        : `kaart (${r.kaart?.stop_zones ?? 0} stop-gebieden) en missie '${r.mission}' staan op de robot (${r.at}); starten doe je daar, tabblad Veldmissie`;
     } catch (err) { msg = String(err.message || err); }
     busy = false;
   }
@@ -167,6 +172,10 @@
   <button onclick={doPlan} disabled={!selected || busy}>Plan</button>
   <button class="primary" onclick={() => drive(false)} disabled={!selected || busy}>Rijden in de sim</button>
   <button class="danger" onclick={stop}>Stop</button>
+  <select class="mode" bind:value={mode} title="Hoe de sim-robot de missie rijdt">
+    <option value="missie">missievolger</option>
+    <option value="waypoints">waypoints (oud)</option>
+  </select>
 </div>
 {#if msg}<div class="msg small">{msg}</div>{/if}
 
@@ -204,16 +213,18 @@
   <div class="sub">Naar de robot</div>
   <div class="row">
     <a class="btn" href="/api/fieldmission/{selected}/veldmissie.json" download>veldmissie.json</a>
+    <a class="btn" href="/api/safety/kaart.json" download>kaart.json</a>
     <a class="btn" href="/api/fieldmission/{selected}/waypoints.json" download>waypoints.json</a>
   </div>
   <div class="row" style="margin-top:6px">
     <input class="grow" type="text" bind:value={robotUrl} />
-    <button onclick={push} disabled={busy} title="Vervangt de waypoints op de robot; start niets">Stuur</button>
+    <button onclick={push} disabled={busy} title="Zet kaart, missie en waypoints op de robot; start niets">Stuur</button>
   </div>
   <div class="tiny muted" style="margin-top:6px">
-    De robot rijdt dit nu als waypoint-route (pure pursuit, één snelheid, werktuig niet geschakeld).
-    veldmissie.json heeft per stuk de snelheid en werktuig omhoog/omlaag; daarvoor is een aanpassing in OpenAgbot
-    nodig (docs/veldmissie.md).
+    veldmissie.json = de route per stuk met snelheid en werktuig omhoog/omlaag; de robot rijdt hem in het tabblad
+    Veldmissie. kaart.json = alle sloten (met slootzone) en verboden gebieden van deze wereld: de robot stopt daar
+    altijd voor, ook bij handmatig rijden. Stuur zet beide op de robot; in het tabblad Veldmissie kun je de
+    bestanden ook zelf laden.
   </div>
 {/if}
 
@@ -240,6 +251,7 @@
   .k-gat { background: #ff6a5d; } .k-marker { background: #fff; }
   input[type='text'] { width: 100%; }
   .link { background: none; border: 0; padding: 0; min-height: 0; color: var(--amber); text-decoration: underline; font-size: 11.5px; }
+  .mode { width: auto !important; font-size: 12px; }
   .btn { display: inline-block; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 4px;
     color: inherit; text-decoration: none; font-size: 12.5px; }
 </style>

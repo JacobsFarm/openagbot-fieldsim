@@ -17,6 +17,9 @@ weggehaald: dat is de enige plek waar de robot een sloot, dijk, hek of weg over 
 
 Dezelfde gevaren gaan als `geofence` mee in veldmissie.json (`geofence_export`), zodat de echte robot dezelfde
 grenzen kan bewaken (zie docs/veldmissie.md in OpenAgbot).
+
+`kaart_export` maakt van ALLE gevaren van de wereld een kaart.json (formaat openagbot.kaart) voor de robot: die
+bewaakt hem altijd, ook zonder missie en bij handmatig rijden (data/kaart.json in OpenAgbot).
 """
 from __future__ import annotations
 
@@ -246,6 +249,56 @@ def geofence_export(world, allowed, segments, half_width_m: float, date=None, mi
                               "gaten": [_ll_ring(world, r.coords) for r in poly.interiors]})
     return {"toegestaan": polys, "verboden": forbidden, "halve_breedte_m": round(half_width_m, 3),
             "slootzone_m": ditch_zone(world)[0], "datum": str(date) if date else None}
+
+
+KAART_FORMAT = "openagbot.kaart"
+
+
+def kaart_export(world, mission_dike_mode: str | None = None) -> dict:
+    """Veiligheidskaart van de hele wereld voor de robot (data/kaart.json, PUT /api/kaart).
+
+    `verboden`: alle gevaren, met de doorgangen eruit gesneden. `actie` stoppen = de robot rijdt er niet in,
+    mijden = alleen een waarschuwing. Nesten gaan mee met hun periode (`van`, `tot`, maand-dag): de robot kijkt
+    zelf naar de datum. `werkgebied`: daarbuiten rijdt de robot nooit. `velden` en `doorgangen` zijn om te tekenen.
+    """
+    import datetime
+    import time as _time
+
+    forbidden = []
+
+    def add(h, extra=None):
+        g = h.geom.simplify(0.05)
+        for poly in getattr(g, "geoms", [g]):
+            if isinstance(poly, Polygon) and not poly.is_empty:
+                item = {"id": h.id, "soort": h.kind, "naam": h.name,
+                        "actie": "stoppen" if h.level == STOP else "mijden",
+                        "polygon": _ll_ring(world, poly.exterior.coords)}
+                if poly.interiors:
+                    item["gaten"] = [_ll_ring(world, r.coords) for r in poly.interiors]
+                if extra:
+                    item.update(extra)
+                forbidden.append(item)
+
+    # Een winterdag: dan is geen nest actief en komen ze er hieronder allemaal met hun periode bij.
+    for h in hazards(world, datetime.date(2001, 1, 1), mission_dike_mode):
+        if h.kind in ("nest", "boom", "marker"):       # bomen en markers: te veel en alleen 'mijden'
+            continue
+        add(h)
+    for n in world.nests:
+        add(Hazard("nest", STOP, Point(n.xy).buffer(max(0.1, n.radius_m), quad_segs=6), n.id, n.name or "vogelnest"),
+            {"van": n.start, "tot": n.end})
+    return {
+        "format": KAART_FORMAT, "versie": 1, "naam": getattr(world, "label", "") or world.name,
+        "gemaakt": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "slootzone_m": ditch_zone(world)[0],
+        "werkgebied": _ll_ring(world, world_bounds(world).simplify(0.5).exterior.coords),
+        "verboden": forbidden,
+        "velden": [{"id": f.id, "naam": f.name, "grens": _ll_ring(world, f.xy)} for f in world.fields
+                   if len(f.xy) >= 3],
+        "doorgangen": [{"id": p.id, "naam": p.name, "soort": p.kind, "breedte_m": p.width_m,
+                        "bevestigen": p.confirm, "lijn": _ll_ring(world, p.xy)}
+                       for p in world.passages if len(p.xy) >= 2],
+    }
 
 
 # ---------------------------------------------------------------------------------------------------- tijdens het rijden
