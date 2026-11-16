@@ -4,7 +4,24 @@
   // missievolger en zijn eigen geofence (kaart.json); missie en kaart kunnen als bestand mee of direct naar de robot.
   import { post } from '../lib/api.js';
 
-  let { scene = null, selected = null, onPlan, onStarted } = $props();
+  let { scene = null, selected = null, onPlan, onStarted, startPoints = [], placingStart = $bindable(false),
+    onStartPoints = null } = $props();
+
+  // Startpunten van dit veld: waar de robot de missie mag beginnen ('' = het punt dat het dichtst bij de robot ligt)
+  let startId = $state('');
+  const starts = $derived(startPoints.filter((p) => p.field === selected));
+  const startLabel = (p) => (p.name ? `${p.nr} · ${p.name}` : `startpunt ${p.nr}`);
+
+  async function startOp(path, body) {
+    try {
+      const d = await post(path, body);
+      onStartPoints?.(d.start_points);
+      plan = null; onPlan?.(null);
+      msg = '';
+    } catch (err) { msg = String(err.message || err); }
+  }
+  $effect(() => { if (startId && !starts.some((p) => p.id === startId)) startId = ''; });
+  $effect(() => () => { placingStart = false; });       // paneel dicht: niet meer zetten
 
   let width = $state(3.0);
   let overlap = $state(0.15);
@@ -50,7 +67,7 @@
     if (!selected) return;
     busy = true; msg = 'plannen...';
     try {
-      plan = await post('/api/fieldmission/plan', { field: selected, settings: settings() });
+      plan = await post('/api/fieldmission/plan', { field: selected, settings: settings(), start_point: startId || null });
       onPlan?.(plan);
       if (autoHeading && plan.swath_heading_deg != null) heading = Math.round(plan.swath_heading_deg);
       if (plan.settings?.clearance?.water != null) water = plan.settings.clearance.water;   // minstens slootzone + marge
@@ -86,11 +103,22 @@
     busy = false;
   }
 
+  // Missiebestand van dit veld opslaan (plant eerst als dat nog niet gedaan is)
+  async function download(file = 'veldmissie.json') {
+    if (!plan) await doPlan();
+    if (!plan) return;
+    const a = document.createElement('a');
+    a.href = `/api/fieldmission/${selected}/${file}`;
+    a.download = `${file.replace('.json', '')}_${selected}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    msg = `${a.download} wordt opgeslagen (map Downloads, of de map die je in het venster kiest)`;
+  }
+
   async function stop() {
     try { await post('/api/agbot/stop'); msg = 'gestopt'; } catch (err) { msg = String(err.message || err); }
   }
 
-  $effect(() => { selected; plan = null; msg = ''; });
+  $effect(() => { selected; plan = null; msg = ''; startId = ''; placingStart = false; });
   // Standaard van het veld (ingesteld in "Wereld bewerken") en de vrije ruimtes van de boerderij overnemen
   $effect(() => {
     const f = scene?.fields.find((x) => x.id === selected);
@@ -114,12 +142,6 @@
   <label>overlap (m)<input type="number" min="0" max="1" step="0.05" bind:value={overlap} /></label>
   <label title="Overlapt de laatste baan meer dan dit met zijn buur, dan vervalt hij en blijft de smalle strook aan de slootkant liggen. 100 = altijd rijden">max overlap laatste baan (%)<input type="number" min="0" max="100" step="5" bind:value={maxOverlap} /></label>
   <label>rondjes kopakker<input type="number" min="0" max="8" step="1" bind:value={rounds} /></label>
-  <label>kopakker
-    <select bind:value={order} disabled={rounds === 0}>
-      <option value="eerst">eerst (draaien op bewerkt)</option>
-      <option value="laatst">laatst (sporen wegwerken)</option>
-    </select>
-  </label>
   <label>rondjes
     <select bind:value={direction}>
       <option value="rechts">met de klok mee</option>
@@ -168,6 +190,42 @@
   </label>
 </div>
 
+<div class="sub">Begin met</div>
+<div class="row first">
+  <button class:active={rounds > 0 && order === 'eerst'} disabled={rounds === 0}
+    onclick={() => { order = 'eerst'; plan = null; onPlan?.(null); }}
+    title="Eerst de kopakkerrondjes langs de rand, daarna de rechte banen (draaien op bewerkt land)">Buitenbaan</button>
+  <button class:active={rounds === 0 || order === 'laatst'}
+    onclick={() => { order = 'laatst'; plan = null; onPlan?.(null); }}
+    title="Eerst de rechte banen, te beginnen met de baan het dichtst bij het startpunt; de kopakkerrondjes komen als laatste (sporen wegwerken)">Eerste rechte baan</button>
+</div>
+<div class="tiny muted" style="margin-top:4px">{rounds === 0 ? 'Geen kopakkerrondjes: de missie begint altijd met een rechte baan.'
+  : order === 'eerst' ? 'Eerst de rondjes langs de rand, dan de rechte banen.'
+    : 'Eerst de rechte banen (vanaf de hoek bij het startpunt), de rondjes langs de rand als laatste.'}</div>
+
+<div class="sub">Startpunt <span class="muted">· waar de robot op dit veld mag beginnen</span></div>
+<div class="row">
+  <select class="grow" bind:value={startId} disabled={!starts.length} onchange={() => { plan = null; onPlan?.(null); }}>
+    <option value="">{starts.length ? 'dichtst bij de robot' : 'geen: begint bij de startplek van de wereld'}</option>
+    {#each starts as p}<option value={p.id}>{startLabel(p)}</option>{/each}
+  </select>
+  <button class:active={placingStart} disabled={!selected} onclick={() => (placingStart = !placingStart)}
+    title="Dubbelklik daarna op de kaart (3D of plattegrond); meer punten per veld kan">{placingStart ? 'Klaar' : 'Zetten'}</button>
+  <button disabled={!selected} onclick={() => startOp('/api/startpoints/add', { field: selected })}
+    title="Startpunt op de plek waar de robot nu staat">Bij robot</button>
+</div>
+{#if placingStart}<div class="tiny hintc">Dubbelklik op de kaart om een startpunt voor dit veld te zetten (mag net buiten de grens, bv. bij de dam).</div>{/if}
+{#if starts.length}
+  <div class="starts">
+    {#each starts as p}
+      <span class="start" class:on={p.id === (startId || plan?.start_point?.id)}>
+        <button class="pick" onclick={() => { startId = p.id; plan = null; onPlan?.(null); }} title="Hier beginnen">{startLabel(p)}</button>
+        <button class="del" onclick={() => startOp('/api/startpoints/remove', { id: p.id })} title="Startpunt weghalen">×</button>
+      </span>
+    {/each}
+  </div>
+{/if}
+
 <div class="row" style="margin-top:8px">
   <button onclick={doPlan} disabled={!selected || busy}>Plan</button>
   <button class="primary" onclick={() => drive(false)} disabled={!selected || busy}>Rijden in de sim</button>
@@ -176,6 +234,10 @@
     <option value="missie">missievolger</option>
     <option value="waypoints">waypoints (oud)</option>
   </select>
+</div>
+<div class="row" style="margin-top:6px">
+  <button class="grow" onclick={() => download()} disabled={!selected || busy}
+    title="Missiebestand van dit veld opslaan op deze computer (bv. voor een USB-stick); laden doe je op de robot in het tabblad Veldmissie">Download missie (veldmissie.json)</button>
 </div>
 {#if msg}<div class="msg small">{msg}</div>{/if}
 
@@ -188,6 +250,9 @@
     <span>{plan.rounds} rondjes · banen {plan.swath_heading_deg ?? '-'}° · {plan.cells.length} {plan.cells.length === 1 ? 'vak' : 'vakken'}
       ({[...new Set(plan.cells.map((c) => c.pattern.replace('_', ' ')))].join(', ')})</span>
     <span>draaicirkel {plan.turn_radius_m} m · overlap {st.overlap_pct}%</span>
+    <span>begint met <b>{plan.segments[0]?.type === 'baan' ? 'een rechte baan' : 'de buitenbaan'}</b></span>
+    {#if plan.start_point}<span>begint bij <b>{startLabel(plan.start_point)}</b>{plan.start_point.auto ? ' (dichtst bij de robot)' : ''}
+      · route start {plan.start_point.route_m} m verderop</span>{/if}
   </div>
   <div class="sub">Randen</div>
   <div class="edges">
@@ -237,6 +302,16 @@
   .grow { flex: 1; min-width: 0; }
   .sub { font-weight: 600; font-size: 12px; margin: 10px 0 4px; }
   .msg { margin-top: 6px; }
+  .sub .muted { font-weight: 400; }
+  .first button { flex: 1; }
+  .hintc { margin-top: 5px; color: var(--blue); }
+  .starts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .start { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden; }
+  .start.on { border-color: var(--blue); }
+  .start.on .pick { color: var(--blue); }
+  .start button { border: 0; border-radius: 0; min-height: 24px; padding: 2px 8px; font-size: 12px; background: transparent; }
+  .start .del { border-left: 1px solid var(--line); color: var(--muted); padding: 2px 7px; }
+  .start .del:hover { color: var(--red); }
   .stats { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; font-size: 12.5px; }
   .edges { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
   .edge i { display: inline-block; width: 10px; height: 4px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }

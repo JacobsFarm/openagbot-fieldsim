@@ -668,3 +668,53 @@ def test_skip_up_to_six_swaths():
     xs = sorted({round(sg.pts[0][0], 1) for sg in swaths})
     jumps = [abs(xs.index(round(b.pts[0][0], 1)) - xs.index(round(a.pts[0][0], 1))) for a, b in zip(swaths, swaths[1:])]
     assert max(jumps) == 7 and p["stats"]["coverage_allowed_pct"] > 98.0
+
+
+# ---------------------------------------------------------------------------------------------------- startpunten
+def test_start_points_per_field_survive_farm_and_steer_the_plan(tmp_path):
+    from openagbot_fieldsim.world.farm import set_start_points
+    from openagbot_fieldsim.world.model import StartPoint
+
+    w = make_world()
+    folder = str(tmp_path / "w")
+    w.save(folder)
+    f = w.frame
+    # twee punten bij veld west (een net buiten de grens, bij het hek), een met een verouderd veld-id in veld oost
+    pts = [{"id": "a", "field": "west", "lat": f.to_latlon(-50, -3)[0], "lon": f.to_latlon(-50, -3)[1], "name": "hek"},
+           {"id": "b", "field": "west", "lat": f.to_latlon(-15, 55)[0], "lon": f.to_latlon(-15, 55)[1]},
+           {"id": "c", "field": "perceel_oud", "lat": f.to_latlon(50, 30)[0], "lon": f.to_latlon(50, 30)[1]}]
+    set_start_points(folder, pts)
+    assert load_farm(folder)["start_points"] == pts
+
+    w2 = load_world(folder)
+    assert [sp.id for sp in w2.start_points_of("west")] == ["a", "b"]
+    assert [sp.id for sp in w2.start_points_of("oost")] == ["c"]          # op de plek teruggevonden
+    assert w2.start_points[0].name == "hek"
+
+    # de route begint op het rondje vlak bij het gekozen startpunt
+    s = PlanSettings(work_width_m=3.0, headland_rounds=2)
+    for sp in w2.start_points_of("west"):
+        p = plan_field(w2, "west", s, start_xy=sp.xy)
+        x0, y0 = p["segments"][0].pts[0][:2]
+        assert math.hypot(x0 - sp.xy[0], y0 - sp.xy[1]) < 12.0, sp.id
+    a, b = (plan_field(w2, "west", s, start_xy=sp.xy)["segments"][0].pts[0][:2] for sp in w2.start_points_of("west"))
+    assert math.hypot(a[0] - b[0], a[1] - b[1]) > 30.0
+
+    # zonder veld in de buurt blijft het punt bewaard (met zijn oude veld-id)
+    far = World(name="t", label="t", origin=(LAT0, LON0, 0.0), area=w.area, terrain={"type": "flat"},
+                fields=[], start_points=[StartPoint("weg", *f.to_latlon(0, 0))])
+    assert far.start_points[0].field == "weg" and far.start_points[0].id
+
+
+def test_mission_can_begin_with_outer_round_or_first_straight_swath():
+    w = make_world()
+    start = (-88.0, 2.0)                                  # hoek van veld west
+    first = {}
+    for order in ("eerst", "laatst"):
+        p = plan_field(w, "west", PlanSettings(work_width_m=3.0, headland_rounds=2, headland_order=order),
+                       start_xy=start)
+        first[order] = p["segments"][0]
+        assert p["segments"][-1].type == ("baan" if order == "eerst" else "rondje")
+    assert first["eerst"].type == "rondje" and first["laatst"].type == "baan"
+    x, y = first["laatst"].pts[0][:2]
+    assert math.hypot(x - start[0], y - start[1]) < 20.0   # de rechte baan in de hoek bij het startpunt

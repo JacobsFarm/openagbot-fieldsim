@@ -78,6 +78,9 @@ def main(argv=None) -> None:
             webbrowser.open(url)
             while True:
                 time.sleep(1)
+        # Zonder dit doet een downloadlink (missie, kaart, waypoints, export) in het venster niets; nu komt er
+        # een 'Opslaan als'-venster.
+        webview.settings["ALLOW_DOWNLOADS"] = True
         webview.create_window("OpenAgbot FieldSim - Bruut OpenAgbot", url, width=1440, height=900, min_size=(900, 600))
         webview.start()
     except KeyboardInterrupt:

@@ -326,6 +326,27 @@ class Pose:
         return {"lat": round(self.lat, 9), "lon": round(self.lon, 9), "heading_deg": self.heading_deg}
 
 
+START_SNAP_M = 25.0               # zo ver mag een startpunt van een veld af liggen om er nog bij te horen
+
+
+@dataclass
+class StartPoint:
+    """Startpunt van een veld: een plek waar de robot de missie van dat veld mag beginnen (bij de dam, het hek).
+    Een veld kan er meer hebben; het punt mag ook net buiten de grens liggen."""
+    field: str                    # id van het veld
+    lat: float
+    lon: float
+    name: str = ""
+    id: str = ""
+    xy: Point = (0.0, 0.0)
+
+    def to_dict(self):
+        d = {"id": self.id, "field": self.field, "lat": round(self.lat, 9), "lon": round(self.lon, 9)}
+        if self.name:
+            d["name"] = self.name
+        return d
+
+
 @dataclass
 class World:
     name: str
@@ -350,6 +371,7 @@ class World:
     overlay: bool = False               # farm.json is toegepast: niet meer als world.json opslaan
     overlay_report: list[str] = field(default_factory=list)
     start_pose: Pose | None = None
+    start_points: list[StartPoint] = field(default_factory=list)    # per veld: waar de robot mag starten
     style: str = "freecad"
     sources: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
@@ -383,6 +405,47 @@ class World:
             d.xy = [self.frame.to_xy(*p) for p in d.line]
         for f in self.fences:
             f.xy = [self.frame.to_xy(*p) for p in f.line]
+        self.link_start_points()
+
+    def link_start_points(self) -> None:
+        """Startpunten in meters, elk met een id, en gekoppeld aan een veld dat bestaat: is het veld-id na een
+        nieuwe bouw veranderd (BRP nummert door), dan hoort het punt bij het veld waar het in of vlak naast ligt."""
+        ids = {f.id for f in self.fields}
+        used: set[str] = set()
+        for i, sp in enumerate(self.start_points):
+            sp.xy = self.frame.to_xy(sp.lat, sp.lon)
+            if sp.field not in ids:
+                near = self.field_near(*sp.xy)
+                if near is not None:
+                    sp.field = near.id
+            n, oid = i + 1, sp.id
+            while not oid or oid in used:
+                oid = f"start_{n}"
+                n += 1
+            sp.id = oid
+            used.add(oid)
+
+    def field_near(self, x: float, y: float, max_m: float = START_SNAP_M) -> "Field | None":
+        """Veld waar (x, y) in ligt, anders het dichtstbijzijnde veld binnen `max_m`."""
+        best, best_d = None, max_m
+        for f in self.fields:
+            d = self.field_distance(f, x, y)
+            if d <= best_d:
+                best, best_d = f, d
+                if d == 0.0:
+                    break
+        return best
+
+    @staticmethod
+    def field_distance(f: "Field", x: float, y: float) -> float:
+        """Afstand van (x, y) tot het veld in meters; 0 als het punt erin ligt."""
+        from openagbot_fieldsim.world.geometry import distance_to_segment
+        if point_in_polygon(x, y, f.xy):
+            return 0.0
+        return min(distance_to_segment(x, y, a, b) for a, b in zip(f.xy, f.xy[1:] + f.xy[:1]))
+
+    def start_points_of(self, field_id: str) -> list[StartPoint]:
+        return [sp for sp in self.start_points if sp.field == field_id]
 
     # ------------------------------------------------------------------ queries
     def field_by_id(self, field_id: str) -> Field:
@@ -447,6 +510,8 @@ class World:
         for key in NEW_LAYERS:
             if getattr(self, key):
                 d[key] = [x.to_dict() for x in getattr(self, key)]
+        if self.start_points:
+            d["start_points"] = [sp.to_dict() for sp in self.start_points]
         d.update(self.extra)
         return d
 
@@ -457,7 +522,7 @@ class World:
         if int(d.get("version", 1)) > VERSION:
             raise ValueError(f"wereldversie {d['version']} is nieuwer dan deze sim ({VERSION})")
         known = {"format", "version", "name", "label", "datum", "style", "origin", "area", "terrain", "sources",
-                 "start_pose", "fields", "surfaces", "ditches", "buildings", "trees", "fences", *NEW_LAYERS,
+                 "start_pose", "start_points", "fields", "surfaces", "ditches", "buildings", "trees", "fences", *NEW_LAYERS,
                  "farm_settings", "_overlay", "_overlay_report"}
         ensure_ids(d)
         src = lambda x: x.get("_source", "bron")      # noqa: E731
@@ -476,6 +541,9 @@ class World:
             sources=d.get("sources", {}),
             start_pose=Pose(sp["lat"], sp["lon"], sp.get("heading_deg") or 0.0)
             if sp and sp.get("lat") is not None else None,
+            start_points=[StartPoint(str(x.get("field", "")), float(x["lat"]), float(x["lon"]), x.get("name", ""),
+                                     x.get("id", "")) for x in d.get("start_points") or []
+                          if x.get("lat") is not None and x.get("lon") is not None],
             fields=[Field(f["id"], f.get("name", f["id"]), ring(f["polygon"]), f.get("crop", ""),
                           [Hole(ring(h["polygon"]), bool(h.get("passable", False)), h.get("name", ""))
                            for h in f.get("holes", []) if len(h.get("polygon", [])) >= 3],

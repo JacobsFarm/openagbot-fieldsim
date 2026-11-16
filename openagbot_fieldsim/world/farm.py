@@ -7,6 +7,7 @@ bewaard. Bij het laden wordt dit bestand over de brondata gelegd (`apply_farm`):
       "format": "openagbot_fieldsim.farm", "version": 1,
       "settings": {"dike_mode": null, "clearance": {...}, "safety": {...}},
       "start_pose": {"lat", "lon", "heading_deg"} | null,
+      "start_points": [{"id", "field", "lat", "lon", "name"?}],        # per veld: waar de robot mag starten
       "hidden":  [{"layer": "fields", "id": "perceel_3", "anchor": [lat, lon]}],     # verborgen bronobjecten
       "objects": {"fields": [...], "ditches": [...], "dikes": [...], "no_go": [...], "zones": [...],
                   "passages": [...], "nests": [...], "markers": [...], "trees": [...], "fences": [...]}
@@ -99,6 +100,8 @@ def save_farm(folder: str, farm: dict, backup: bool = True) -> str:
             "settings": farm_settings(farm.get("settings")), "start_pose": farm.get("start_pose"),
             "hidden": farm.get("hidden", []),
             "objects": {k: v for k, v in farm.get("objects", {}).items() if v}}
+    if "start_points" in farm:          # ook een lege lijst: dan zijn ze hier bewust weggehaald
+        data["start_points"] = farm["start_points"]
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(data, fh, indent=1, ensure_ascii=False)
@@ -146,6 +149,9 @@ def validate_farm(farm: dict) -> list[str]:
     for h in farm.get("hidden", []):
         if h.get("layer") not in LAYERS or not h.get("id"):
             out.append(f"verborgen object zonder laag of id: {h}")
+    for sp in farm.get("start_points") or []:
+        if not isinstance(sp, dict) or not _ok_ll([sp.get("lat"), sp.get("lon")]):
+            out.append(f"startpunt met ongeldige coördinaat: {sp}")
     return out
 
 
@@ -258,6 +264,8 @@ def apply_farm(base: dict, farm: dict) -> dict:
             target.append(obj)
     if farm.get("start_pose"):
         out["start_pose"] = farm["start_pose"]
+    if "start_points" in farm:
+        out["start_points"] = copy.deepcopy(farm["start_points"])
     out["farm_settings"] = farm_settings(farm.get("settings"))
     out["_overlay"] = True
     out["_overlay_report"] = report
@@ -270,3 +278,11 @@ def set_start_pose(folder: str, lat: float, lon: float, heading_deg: float) -> d
     farm["start_pose"] = {"lat": round(lat, 9), "lon": round(lon, 9), "heading_deg": round(heading_deg, 1)}
     save_farm(folder, farm)
     return farm["start_pose"]
+
+
+def set_start_points(folder: str, points: list[dict]) -> list[dict]:
+    """Startpunten van de velden in farm.json zetten (overleeft een nieuwe bouw en bewaren in de editor)."""
+    farm = load_farm(folder) or empty_farm()
+    farm["start_points"] = points
+    save_farm(folder, farm)
+    return points

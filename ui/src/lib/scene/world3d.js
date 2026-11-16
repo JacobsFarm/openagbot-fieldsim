@@ -73,6 +73,7 @@ export class World3D {
     this.resize();
     const loop = () => {
       this._raf = requestAnimationFrame(loop);
+      if (this.suspended) return;               // de 2D-plattegrond staat ervoor: niet tekenen
       const t = this._clock.getElapsedTime();
       this._updateCamera(t);
       this.controls.update();
@@ -586,6 +587,7 @@ export class World3D {
 
   // Puntmissie: paaltjes met de route ertussen (in volgorde)
   setPoints(points) {
+    this.onPoints?.(points ?? []);              // de 2D-plattegrond tekent dezelfde punten
     if (this._points) this.scene.remove(this._points);
     this._points = null;
     this._pointsInst = null;
@@ -608,6 +610,31 @@ export class World3D {
         maxSeg: 3, order: ORDER.overlay + 1 }));
     }
     this._points = group;
+    this.scene.add(group);
+  }
+
+  // Startpunten van de velden: blauwe paal met een vlagje; het punt waar de geplande missie begint is geel
+  setStartPoints(points, activeId = null) {
+    if (this._starts) { this.scene.remove(this._starts); this._starts.traverse((o) => o.geometry?.dispose()); }
+    this._starts = null;
+    if (!points?.length || !this.hf) return;
+    const group = new THREE.Group();
+    const pole = new THREE.CylinderGeometry(0.05, 0.05, 1.8, 10);
+    pole.rotateX(Math.PI / 2);
+    pole.translate(0, 0, 0.9);
+    const flag = new THREE.BoxGeometry(0.6, 0.03, 0.38);
+    flag.translate(0.3, 0, 1.6);
+    const poles = new THREE.InstancedMesh(pole, new THREE.MeshStandardMaterial({ color: 0xe9f0f2, roughness: 0.5 }), points.length);
+    const flags = new THREE.InstancedMesh(flag, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6,
+      emissive: 0x16324a, emissiveIntensity: 0.6 }), points.length);
+    const m = new THREE.Matrix4(), blue = new THREE.Color(0x4fb3ff), amber = new THREE.Color(0xffb23e);
+    points.forEach((p, i) => {
+      m.makeTranslation(p.x, p.y, this.hf.at(p.x, p.y));
+      poles.setMatrixAt(i, m); flags.setMatrixAt(i, m);
+      flags.setColorAt(i, p.id === activeId ? amber : blue);
+    });
+    for (const inst of [poles, flags]) { inst.castShadow = true; inst.frustumCulled = false; group.add(inst); }
+    this._starts = group;
     this.scene.add(group);
   }
 

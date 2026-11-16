@@ -5,7 +5,8 @@
   import FarmMissionPanel from './FarmMissionPanel.svelte';
   import FieldMissionPanel from './FieldMissionPanel.svelte';
 
-  let { scene, selected = $bindable(null), onPlan, onStarted, onFocus } = $props();
+  let { scene, selected = $bindable(null), onPlan, onStarted, onFocus, startPoints = [],
+    placingStart = $bindable(false), onStartPoints = null } = $props();
   let width = $state(3.0);
   let headland = $state(8.0);
   let speed = $state(3.0);
@@ -71,7 +72,7 @@
 </div>
 
 {#if mode === 'veld'}
-<FieldMissionPanel {scene} {selected} {onPlan} {onStarted} />
+<FieldMissionPanel {scene} {selected} {onPlan} {onStarted} {startPoints} bind:placingStart {onStartPoints} />
 {:else}
 <div class="sec">AB-missie</div>
 <div class="grid">

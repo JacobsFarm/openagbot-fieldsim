@@ -9,6 +9,13 @@
                                                      'waypoints' (pure pursuit van punt naar punt)
   POST /api/fieldmission/push {field, robot_url}     kaart, missie en waypoints naar de ECHTE robot (start niets)
   GET  /api/fieldmission/boundaries/{field}          randen van het perceel: wat ligt ernaast, hoeveel ruimte
+
+Startpunten per veld (waar de robot de missie van dat veld mag beginnen; bewaard in farm.json):
+
+  GET  /api/startpoints                              alle startpunten (lokale meters)
+  POST /api/startpoints/add {field, x?, y?, name?}   punt zetten (zonder x, y: waar de robot nu staat)
+  POST /api/startpoints/remove {id}                  punt weghalen
+  POST /api/fieldmission/plan {..., start_point}     de route begint bij dat punt (zonder: dichtst bij de robot)
 """
 from __future__ import annotations
 
@@ -16,12 +23,15 @@ import json
 import math
 import os
 import time
+import uuid
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from openagbot_fieldsim.agbot import robot_link
+from openagbot_fieldsim.api.scene import start_points as scene_start_points
+from openagbot_fieldsim.world.model import START_SNAP_M, StartPoint
 from openagbot_fieldsim.missions.boundary import edge_summary, field_area
 from openagbot_fieldsim.missions.field_plan import PlanSettings, plan_field, plan_view, to_veldmissie, to_waypoints
 
@@ -29,6 +39,18 @@ from openagbot_fieldsim.missions.field_plan import PlanSettings, plan_field, pla
 class PlanBody(BaseModel):
     field: str
     settings: dict = {}
+    start_point: str | None = None       # id van een startpunt van dit veld; None = het dichtstbijzijnde bij de robot
+
+
+class StartPointBody(BaseModel):
+    field: str
+    x: float | None = None               # lokale meters; zonder x, y: waar de robot nu staat
+    y: float | None = None
+    name: str = ""
+
+
+class StartPointRemove(BaseModel):
+    id: str
 
 
 class DriveBody(BaseModel):
@@ -62,16 +84,82 @@ def register(app: FastAPI, sim_app) -> None:
     def mission_dir() -> str:
         return os.path.join(world().folder, "missions")
 
+    # ------------------------------------------------------------------ startpunten per veld
+    def save_start_points(w) -> dict:
+        from openagbot_fieldsim.world.farm import set_start_points
+        w.link_start_points()
+        try:
+            set_start_points(w.folder, [sp.to_dict() for sp in w.start_points])
+        except (OSError, ValueError, TypeError) as e:
+            raise HTTPException(500, f"startpunten bewaren mislukt: {e}")
+        return {"start_points": scene_start_points(w)}
+
+    @app.get("/api/startpoints")
+    def start_points_list():
+        return {"start_points": scene_start_points(world())}
+
+    @app.post("/api/startpoints/add")
+    def start_points_add(body: StartPointBody):
+        """Startpunt bij een veld zetten: op (x, y), of waar de robot nu staat. Komt in farm.json."""
+        w = world()
+        try:
+            w.field_by_id(body.field)
+        except KeyError:
+            raise HTTPException(404, f"onbekend veld {body.field}")
+        if body.x is None or body.y is None:
+            if sim_app.sim is None:
+                raise HTTPException(400, "geef x en y")
+            x, y = sim_app.sim.vehicle.s.x, sim_app.sim.vehicle.s.y
+        else:
+            x, y = body.x, body.y
+        if w.field_distance(w.field_by_id(body.field), x, y) > START_SNAP_M:
+            raise HTTPException(400, f"dat punt ligt meer dan {START_SNAP_M:.0f} m buiten het veld")
+        lat, lon = w.frame.to_latlon(x, y)
+        w.start_points.append(StartPoint(body.field, lat, lon, body.name.strip(), f"start_{uuid.uuid4().hex[:8]}"))
+        return save_start_points(w)
+
+    @app.post("/api/startpoints/remove")
+    def start_points_remove(body: StartPointRemove):
+        w = world()
+        keep = [sp for sp in w.start_points if sp.id != body.id]
+        if len(keep) == len(w.start_points):
+            raise HTTPException(404, "onbekend startpunt")
+        w.start_points[:] = keep
+        return save_start_points(w)
+
+    def pick_start(w, field: str, start_id: str | None):
+        """Het startpunt voor deze missie: het gekozen punt, anders het punt van dit veld dat het dichtst bij de
+        robot ligt. None = het veld heeft geen startpunten (dan begint de route bij de startplek van de wereld)."""
+        pts = w.start_points_of(field)
+        if start_id:
+            sp = next((p for p in pts if p.id == start_id), None)
+            if sp is None:
+                raise ValueError("dat startpunt hoort niet (meer) bij dit veld")
+            return sp
+        if not pts:
+            return None
+        if sim_app.sim is not None:
+            rx, ry = sim_app.sim.vehicle.s.x, sim_app.sim.vehicle.s.y
+        else:
+            rx, ry, _ = w.start_xy_heading()
+        return min(pts, key=lambda p: math.hypot(p.xy[0] - rx, p.xy[1] - ry))
+
     @app.post("/api/fieldmission/plan")
     def plan(body: PlanBody):
         w = world()
         try:
             s = PlanSettings.from_dict(body.settings)
             vehicle = sim_app.sim.params if sim_app.sim is not None else None
-            p = plan_field(w, body.field, s, vehicle)
+            sp = pick_start(w, body.field, body.start_point)
+            p = plan_field(w, body.field, s, vehicle, None if sp is None else (sp.xy[0], sp.xy[1]))
         except (KeyError, ValueError, TypeError) as e:
             raise HTTPException(400, str(e))
         view = plan_view(p)
+        if sp is not None and p["segments"]:
+            x0, y0 = p["segments"][0].pts[0][:2]
+            info = next(d for d in scene_start_points(w) if d["id"] == sp.id)
+            view["start_point"] = {**info, "auto": not body.start_point,
+                                   "route_m": round(math.hypot(x0 - sp.xy[0], y0 - sp.xy[1]), 1)}
         cache[body.field] = {"plan": p, "view": view, "world": w}
         fld = w.field_by_id(body.field)
         try:

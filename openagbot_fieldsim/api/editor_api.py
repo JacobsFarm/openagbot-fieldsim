@@ -285,6 +285,8 @@ def register(app: FastAPI, sim_app) -> None:
         report: list[str] = []
         farm = empty_farm()
         farm["start_pose"] = old.get("start_pose")
+        if "start_points" in old:                    # startpunten van de velden zet je in de sim, niet hier
+            farm["start_points"] = old["start_points"]
         farm["settings"] = farm_settings({**old.get("settings", {}), **(body.settings or {})})
         try:
             for layer, objs in body.objects.items():

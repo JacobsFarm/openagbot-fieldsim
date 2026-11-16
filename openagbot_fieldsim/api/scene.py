@@ -47,6 +47,16 @@ def _ditch_zone(world) -> dict:
         return {"width": 0.0, "rings": []}
 
 
+def start_points(world) -> list[dict]:
+    """Startpunten van de velden in lokale meters; `nr` telt per veld (1, 2, ...)."""
+    out, count = [], {}
+    for sp in world.start_points:
+        count[sp.field] = count.get(sp.field, 0) + 1
+        out.append({"id": sp.id, "field": sp.field, "nr": count[sp.field], "name": sp.name,
+                    "x": round(sp.xy[0], 2), "y": round(sp.xy[1], 2)})
+    return out
+
+
 def scene(world, terrain, params) -> dict:
     levels = terrain.ditch_levels or [0.0] * len(world.ditches)
     sx, sy, sh = world.start_xy_heading()
@@ -56,6 +66,7 @@ def scene(world, terrain, params) -> dict:
         "origin": {"lat": world.origin[0], "lon": world.origin[1], "h": world.origin[2]},
         "area": _r(world.area_xy),
         "start": {"x": sx, "y": sy, "heading": sh},
+        "start_points": start_points(world),
         "fields": [{"id": f.id, "name": f.name, "crop": f.crop, "poly": _r(f.xy),
                     "area_ha": round(polygon_area(f.xy) / 1e4, 2), "center": _r([centroid(f.xy)])[0],
                     "holes": [{"poly": _r(h.xy), "passable": h.passable} for h in f.holes],

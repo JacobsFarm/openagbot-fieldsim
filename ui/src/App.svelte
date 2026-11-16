@@ -4,6 +4,7 @@
   import ConsolePanel from './components/ConsolePanel.svelte';
   import DriveHud from './components/DriveHud.svelte';
   import FaultPanel from './components/FaultPanel.svelte';
+  import FieldMap2D from './components/FieldMap2D.svelte';
   import Icon from './components/Icon.svelte';
   import ImplementPanel from './components/ImplementPanel.svelte';
   import MainMenu from './components/MainMenu.svelte';
@@ -37,6 +38,14 @@
   let placing = $state(false);           // punten zetten met dubbelklik
   let pointsVersion = $state(0);
   let camMode = $state('rond');
+  let map2d = $state(false);             // vlakke plattegrond in plaats van het 3D-beeld
+  let mapRef = $state(null);
+  let mapInfo = $state.raw(null);        // muispositie, veld onder de muis en schaalbalk van de plattegrond
+  let mapFollow = $state(false);
+  let plannedPath = $state.raw(null);    // route die de robot zelf plant (ook op de plattegrond)
+  let points2d = $state.raw([]);
+  let startPoints = $state.raw([]);      // startpunten per veld (waar de robot een veldmissie mag beginnen)
+  let placingStart = $state(false);      // dubbelklik zet een startpunt bij het gekozen veld
   let mission = $state.raw(null);
   let selectedField = $state(null);
   let order = $state.raw([]);
@@ -78,7 +87,9 @@
       w3d.load(s, t.header, t.heights);
       applySettings(w3d, settings);
       if (settings.aerial) loadAerial(s);
-      mission = null; order = []; trailXY = []; lastTrailTotal = 0;
+      mission = null; order = []; trailXY = []; lastTrailTotal = 0; plannedPath = null; points2d = [];
+      placingStart = false;
+      setStarts(s.start_points ?? []);
       const cat = await get('/api/implements');
       implements_ = cat.implements; implementId = cat.current;
       w3d.setImplement(implements_.find((c) => c.id === implementId) ?? null);
@@ -170,6 +181,7 @@
           planVersion = p.versie;
           order = p.order;
           w3d.setPlannedPath(p.path);
+          plannedPath = p.path;
         }
       }
     } catch (err) { console.warn('OpenAgbot-status', err); ab = null; }
@@ -204,7 +216,8 @@
     }
     if (paused) return;
     if (down && !e.repeat) {
-      if (k === 'c') { setCam(CAMERA_MODES[(CAMERA_MODES.indexOf(camMode) + 1) % CAMERA_MODES.length]); return; }
+      if (k === 'c') { pickCam(CAMERA_MODES[(CAMERA_MODES.indexOf(camMode) + 1) % CAMERA_MODES.length]); return; }
+      if (k === 'm') { map2d = !map2d; return; }
       if (k === 'p') { post('/api/sim/pause', { paused: !st?.paused }).catch(() => {}); return; }
       if (k === 'h') { set('hud', !settings.hud); return; }
     }
@@ -215,6 +228,34 @@
   }
 
   function setCam(m) { camMode = m; w3d.setMode(m); }
+  function pickCam(m) { map2d = false; setCam(m); }       // een camera kiezen = terug naar 3D
+
+  // Dubbelklik in 3D of op de plattegrond: punt zetten, veld openen of de robot daar neerzetten
+  function setStarts(list) { startPoints = list; }
+  // 3D: palen met een vlagje; het punt waar de geplande missie begint krijgt een andere kleur
+  $effect(() => {
+    const list = startPoints, active = mission?.start_point?.id ?? null;      // eerst lezen: daar hangt het effect aan
+    if (w3d?.hf) w3d.setStartPoints(list, active);
+  });
+  $effect(() => { if (tab !== 'missie') placingStart = false; });
+
+  function pick({ x, y, field }) {
+    if (screen !== 'sim' || paused) return;
+    if (placingStart && selectedField) {
+      post('/api/startpoints/add', { field: selectedField, x, y }).then((d) => setStarts(d.start_points))
+        .catch((e) => toast('fout', `Startpunt: ${e.message || e}`));
+      return;
+    }
+    if (placing) {
+      post('/api/points/add', { x, y }).then((d) => { w3d.setPoints(d.points); pointsVersion++; }).catch(() => {});
+      return;
+    }
+    if (field) { selectedField = field.id; tab = 'missie'; return; }
+    post('/api/sim/reset', { x, y, heading: st?.robot?.heading ?? 0 }).catch(() => {});
+  }
+
+  // Het 3D-beeld hoeft niet te renderen zolang de plattegrond ervoor staat
+  $effect(() => { if (w3d) w3d.suspended = map2d && screen === 'sim'; });
 
   function set(key, value) {
     settings[key] = value;
@@ -252,16 +293,8 @@
     w3d = new World3D(viewport);
     w3d.mode = 'rond';
     window.__fieldsim = { w3d };       // voor debuggen in de devtools
-    w3d.onPick = ({ x, y, field }) => {
-      if (screen !== 'sim' || paused) return;
-      if (placing) {
-        post('/api/points/add', { x, y }).then((d) => { w3d.setPoints(d.points); pointsVersion++; }).catch(() => {});
-        return;
-      }
-      if (field) { selectedField = field.id; tab = 'missie'; return; }
-      // Dubbelklik op de grond: robot daar neerzetten, in dezelfde richting
-      post('/api/sim/reset', { x, y, heading: st?.robot?.heading ?? 0 }).catch(() => {});
-    };
+    w3d.onPick = pick;
+    w3d.onPoints = (p) => (points2d = p);
     try {
       const ws = await get('/api/worlds');
       worlds = ws.worlds; currentWorld = ws.current;
@@ -316,7 +349,7 @@
 <svelte:head><title>OpenAgbot FieldSim{scene ? ` - ${scene.label}` : ''}</title></svelte:head>
 
 <div class="viewport" bind:this={viewport}></div>
-<div class="vignette"></div>
+{#if !(map2d && screen === 'sim')}<div class="vignette"></div>{/if}
 
 {#if screen === 'menu'}
   <MainMenu {worlds} current={currentWorld} {scene} sim={st} {loading} {settings} onSet={set} onStart={start}
@@ -325,6 +358,13 @@
   <WorldEditor {worlds} onClose={() => { screen = 'menu'; refreshWorlds(); }} onSaved={() => { lastEventT = null; loadWorld(); }}
     onWorldCreated={refreshWorlds} />
 {:else}
+  {#if map2d}
+    <FieldMap2D bind:this={mapRef} bind:follow={mapFollow} {scene} robot={r} {mission} trail={trailXY} doneSwaths={done}
+      current={ab?.ab_active ? ab.current_swath : null} selected={selectedField} path={plannedPath} points={points2d}
+      starts={startPoints} activeStart={mission?.start_point?.id ?? null}
+      layers={settings} onPick={pick} onSelect={(id) => { if (!placingStart) selectedField = id; }}
+      onInfo={(i) => (mapInfo = i)} />
+  {/if}
   {#if settings.hud}
     <!-- Linksboven: waar ben ik en hoe gaat het met de robot -->
     <div class="panel tl">
@@ -360,10 +400,10 @@
         </div>
         <div class="drawer-body">
           {#if tab === 'missie'}
-            <MissionPanel {scene} bind:selected={selectedField}
-              onPlan={(p) => { mission = p; w3d.setMission(p); planVersion = null; if (p?.kind === 'veldmissie') { order = []; w3d.setPlannedPath(null); } }}
+            <MissionPanel {scene} bind:selected={selectedField} {startPoints} bind:placingStart onStartPoints={setStarts}
+              onPlan={(p) => { mission = p; w3d.setMission(p); planVersion = null; if (p?.kind === 'veldmissie') { order = []; w3d.setPlannedPath(null); plannedPath = null; } }}
               onStarted={() => { w3d.clearTrail(); trailXY = []; setCam('volg'); }}
-              onFocus={(f) => w3d.focus(f.center[0], f.center[1], Math.sqrt(f.area_ha * 1e4) * 1.4)} />
+              onFocus={(f) => { w3d.focus(f.center[0], f.center[1], Math.sqrt(f.area_ha * 1e4) * 1.4); mapRef?.fitField(f.id); }} />
           {:else if tab === 'wereld'}
             <WorldPanel {scene} {w3d} current={currentWorld} onSwitch={switchWorld} onRebuilt={loadWorld} />
           {:else if tab === 'punten'}
@@ -395,10 +435,13 @@
     <div class="tr">
       <div class="panel seg">
         {#each CAMERA_MODES as m}
-          <button class:active={camMode === m} onclick={() => setCam(m)} title="Camera: {camLabel[m][0]} (C)">
+          <button class:active={!map2d && camMode === m} onclick={() => pickCam(m)} title="Camera: {camLabel[m][0]} (C)">
             <Icon name={camLabel[m][1]} size={18} /><span>{camLabel[m][0]}</span>
           </button>
         {/each}
+        <button class:active={map2d} onclick={() => (map2d = !map2d)} title="Plattegrond: vlakke 2D-kaart met perceelgrenzen (M)">
+          <Icon name="plan" size={18} /><span>Kaart</span>
+        </button>
       </div>
       <div class="panel seg">
         <button class:active={showView} onclick={() => (showView = !showView)} title="Weergave"><Icon name="eye" size={18} /></button>
@@ -444,7 +487,22 @@
 
     <!-- Rechtsonder: minikaart en missie -->
     <div class="panel br">
-      <MiniMap {scene} robot={r} {mission} trail={trailXY} doneSwaths={done} current={ab?.ab_active ? ab.current_swath : null} />
+      {#if map2d}
+        <!-- Plattegrond: de minikaart is dan dubbel; hier staan de bediening, de schaal en de muispositie -->
+        <div class="mapbar">
+          <button onclick={() => mapRef?.fitAll()} title="Hele wereld in beeld">Alles</button>
+          <button disabled={!selectedField} onclick={() => mapRef?.fitField(selectedField)} title="Gekozen veld in beeld">Veld</button>
+          <button class:active={mapFollow} onclick={() => (mapFollow = !mapFollow)} title="Robot in het midden houden">Volg robot</button>
+        </div>
+        <div class="mapinfo num">
+          {#if mapInfo}<span class="scale"><i style="width:{mapInfo.barPx}px"></i>{mapInfo.barM} m</span>{/if}
+          {#if mapInfo?.x != null}<span>x {mapInfo.x.toFixed(1)} · y {mapInfo.y.toFixed(1)} m</span>{/if}
+          {#if mapInfo?.field}<span><b>{mapInfo.field.name}</b> · {mapInfo.field.area_ha.toFixed(2)} ha</span>{/if}
+        </div>
+      {:else}
+        <MiniMap {scene} robot={r} {mission} trail={trailXY} doneSwaths={done} current={ab?.ab_active ? ab.current_swath : null}
+          starts={startPoints} />
+      {/if}
       <div class="meta num">
         {#if ab?.ab_active}<span>baan <b>{ab.ab_baan_nr}</b> / {ab.ab_totaal_banen}</span>{/if}
         {#if st?.implement}<span>{st.implement.lowered ? 'werktuig omlaag' : 'werktuig omhoog'}</span>{/if}
@@ -466,6 +524,7 @@
         <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> rijden</span>
         <span><kbd>Spatie</kbd> stop</span>
         <span><kbd>C</kbd> camera</span>
+        <span><kbd>M</kbd> kaart</span>
         <span><kbd>Esc</kbd> menu</span>
       </div>
     {/if}
@@ -563,6 +622,13 @@
   .br { right: var(--margin); bottom: var(--margin); padding: 8px; }
   .meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin: 7px 2px 0; max-width: 300px; }
   .meta b { color: var(--amber); font-weight: 600; }
+  .mapbar { display: flex; gap: 5px; width: 300px; }
+  .mapbar button { flex: 1; }
+  .mapinfo { display: flex; flex-direction: column; gap: 3px; min-height: 58px; margin: 9px 2px 0; font-size: 12px;
+    color: var(--muted); }
+  .mapinfo b { color: var(--ink); font-weight: 600; }
+  .mapinfo .scale { display: flex; align-items: center; gap: 7px; color: var(--ink); }
+  .mapinfo .scale i { height: 5px; max-width: 220px; border: 1px solid var(--ink); border-top: 0; }
 
   .bl { left: var(--margin); bottom: var(--margin); display: flex; gap: 10px; align-items: baseline; padding: 8px 14px; }
   .bl .lab { font-family: var(--display); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }

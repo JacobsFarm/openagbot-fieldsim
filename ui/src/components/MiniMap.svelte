@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import { color, css } from '../theme.js';
 
-  let { scene = null, robot = null, mission = null, trail = [], doneSwaths = [], current = null, width = 300,
+  let { scene = null, robot = null, mission = null, trail = [], doneSwaths = [], current = null, starts = [], width = 300,
     height = 186 } = $props();
   let canvas;
   let scale = $state(0);                 // beeldpunten per meter (voor de schaalbalk)
@@ -101,6 +101,11 @@
         }
       });
     }
+    for (const p of starts) if (!mission || p.field === mission.field_id) {      // startpunten van de velden
+      ctx.beginPath(); ctx.arc(v.tx(p.x), v.ty(p.y), 3, 0, Math.PI * 2);
+      ctx.fillStyle = p.id === mission?.start_point?.id ? '#ffb23e' : '#4fb3ff'; ctx.fill();
+      ctx.strokeStyle = '#0b1114'; ctx.lineWidth = 1; ctx.stroke();
+    }
     if (trail.length > 1) {
       ctx.beginPath();
       trail.forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
@@ -124,7 +129,7 @@
   });
 
   onMount(draw);
-  $effect(() => { scene; robot; mission; trail.length; doneSwaths.length; current; draw(); });
+  $effect(() => { scene; robot; mission; starts; trail.length; doneSwaths.length; current; draw(); });
 </script>
 
 <div class="map" style="width:{width}px;height:{height}px">
