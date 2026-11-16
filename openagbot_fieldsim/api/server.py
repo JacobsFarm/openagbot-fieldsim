@@ -16,6 +16,7 @@
   GET  /api/agbot/plan                   gepland rijpad van de lopende AB-missie (uit OpenAgbot zelf)
   /api/implements...                     aanbouwdelen: zie api/implements_api.py
   /api/fieldmission...                   veldmissies (rondjes + banen + bochten): zie api/field_api.py
+  /api/fleet...                          vloot: echte robots live volgen en aansturen: zie api/fleet_api.py
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from openagbot_fieldsim.api import editor_api, farm_api, field_api, implements_api, points_api
+from openagbot_fieldsim.api import editor_api, farm_api, field_api, fleet_api, implements_api, points_api
 from openagbot_fieldsim.api.scene import scene, terrain_bytes
 from openagbot_fieldsim.app import SimApp
 from openagbot_fieldsim.missions.ab import plan_ab, save_ab_line, start_command
@@ -316,12 +317,15 @@ def create_app(sim_app: SimApp) -> FastAPI:
     farm_api.register(app, sim_app)
     editor_api.register(app, sim_app)
     implements_api.register(app, sim_app)
+    fleet_api.register(app, sim_app)
 
     @app.websocket("/ws")
     async def ws_state(ws: WebSocket):
         await ws.accept()
         trail_from = 0
         strip_from, strip_key = 0, None
+        fleet_cursors: dict = {}          # per robot wat deze kijker al van zijn spoor heeft
+        fleet_world = None                # andere wereld = andere meters: sporen opnieuw sturen
         try:
             while True:
                 sim = sim_app.sim
@@ -335,6 +339,10 @@ def create_app(sim_app: SimApp) -> FastAPI:
                     if snap["implement"]:
                         strip_from = snap["implement"]["strip"]["total"]
                     snap["agbot"] = {"running": sim_app.agbot.running, "url": sim_app.agbot.url}
+                    if fleet_world is not sim.world:
+                        fleet_world = sim.world
+                        fleet_cursors.clear()
+                    snap["fleet"] = sim_app.fleet.snapshot(sim.world.frame, sim.terrain, fleet_cursors)
                     await ws.send_text(json.dumps(snap, separators=(",", ":")))
                 await asyncio.sleep(1 / 30)
         except (WebSocketDisconnect, RuntimeError):

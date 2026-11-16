@@ -7,7 +7,7 @@
   let field = $state('');
   let count = $state(60);
   let speed = $state(2.5);
-  let robotUrl = $state('http://192.168.4.1:8000');
+  let robotUrl = $state(localStorage.getItem('fieldsim.robotUrl') ?? 'http://192.168.4.1:8000');
   let msg = $state('');
 
   async function refresh() { show(await get('/api/points')); }

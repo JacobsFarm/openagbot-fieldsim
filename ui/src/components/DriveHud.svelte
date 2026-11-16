@@ -64,14 +64,16 @@
     <div class="side">
       <div class="lab">Accu</div>
       <div class="batt"><div class="fill" class:low={soc < 0.25} style="width:{Math.max(3, soc * 100)}%"></div></div>
-      <div class="val num">{battery ? `${Math.round(soc * 100)} % · ${battery.v.toFixed(1)} V` : '-'}</div>
+      <div class="val num">{battery ? [battery.soc != null ? `${Math.round(soc * 100)} %` : null,
+        battery.v != null ? `${battery.v.toFixed(1)} V` : null].filter(Boolean).join(' · ') || '-' : '-'}</div>
     </div>
   </div>
 
   <div class="foot num">
     <span>koers <b>{heading.toFixed(0)}°</b></span>
-    <span>{robot ? `${robot.odometer_m.toFixed(0)} m` : '-'} gereden</span>
-    {#if battery}<span>{Math.abs(battery.a).toFixed(1)} A</span>{/if}
+    {#if robot?.odometer_m != null}<span>{robot.odometer_m.toFixed(0)} m gereden</span>{/if}
+    {#if battery?.a != null}<span>{Math.abs(battery.a).toFixed(1)} A</span>{/if}
+    {#if robot?.live}<span class="live">live · {robot.live}</span>{/if}
   </div>
 </div>
 
@@ -95,4 +97,5 @@
   .batt .fill.low { background: var(--red); }
   .foot { display: flex; gap: 18px; font-size: 12px; color: var(--muted); margin-top: 2px; }
   .foot b { color: var(--ink); font-weight: 500; }
+  .foot .live { color: var(--amber); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 </style>

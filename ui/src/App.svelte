@@ -5,6 +5,7 @@
   import DriveHud from './components/DriveHud.svelte';
   import FaultPanel from './components/FaultPanel.svelte';
   import FieldMap2D from './components/FieldMap2D.svelte';
+  import FleetPanel from './components/FleetPanel.svelte';
   import Icon from './components/Icon.svelte';
   import ImplementPanel from './components/ImplementPanel.svelte';
   import MainMenu from './components/MainMenu.svelte';
@@ -33,7 +34,8 @@
   let paused = $state(false);            // pauzemenu open
   let settings = $state(loadSettings());
   let tab = $state('');
-  let showRobotUi = $state(false);
+  let robotUi = $state.raw(null);        // {name, url}: webinterface van de sim-robot of van een robot uit de vloot
+  let followId = $state(null);           // robot uit de vloot die de camera en de meters volgen (null = sim-robot)
   let showView = $state(false);          // uitklapper 'weergave' (lagen)
   let placing = $state(false);           // punten zetten met dubbelklik
   let pointsVersion = $state(0);
@@ -53,6 +55,7 @@
   let toasts = $state([]);
   let lastTrailTotal = 0;
   let lastEventT = null;
+  let lastFleetSeq = null;
   let planVersion = null;
   let wasPaused = false;
   let implements_ = $state.raw([]);      // catalogus van aanbouwdelen
@@ -64,7 +67,7 @@
   const surfaceLabel = { yard: 'erf', grass: 'gras', field: 'veld', track: 'kavelpad', paved: 'verharding', road: 'weg',
     verge: 'berm', water: 'water' };
   const camLabel = { volg: ['Volg', 'follow'], vrij: ['Vrij', 'orbit'], boven: ['Boven', 'top'] };
-  const tabs = [['missie', 'Missie', 'mission'], ['punten', 'Punten', 'points'], ['werktuig', 'Werktuig', 'implement'],
+  const tabs = [['vloot', 'Vloot', 'fleet'], ['missie', 'Missie', 'mission'], ['punten', 'Punten', 'points'], ['werktuig', 'Werktuig', 'implement'],
     ['replay', 'Replay', 'replay'], ['storingen', 'Storingen', 'fault'], ['console', 'Console', 'console'],
     ['wereld', 'Wereld', 'world']];
   const viewToggles = [['boundaries', 'Perceelgrenzen'], ['labels', 'Veldnamen'], ['nogo', 'Sloten markeren'],
@@ -93,6 +96,7 @@
       const cat = await get('/api/implements');
       implements_ = cat.implements; implementId = cat.current;
       w3d.setImplement(implements_.find((c) => c.id === implementId) ?? null);
+      stopState?.restart();              // sporen (sim en vloot) opnieuw vanaf het begin in de nieuwe wereld
     } catch (e) {
       toast('fout', `Wereld laden mislukt: ${e.message || e}`);
     }
@@ -150,6 +154,11 @@
     st = s;
     if (!w3d || !w3d.hf) return;
     w3d.setRobot(s.robot);
+    w3d.setFleet(s.fleet?.robots);
+    // Meldingen van de vloot (verbonden, verbinding weg, fout op een robot)
+    const fe = s.fleet?.events ?? [];
+    if (lastFleetSeq === null) lastFleetSeq = fe.length ? fe[fe.length - 1].seq : 0;
+    for (const e of fe) if (e.seq > lastFleetSeq) { toast(e.kind, e.text); lastFleetSeq = e.seq; }
     const iid = s.implement?.id ?? null;
     if (iid !== (w3d.implement?.spec.id ?? null) && implements_.length) {   // ook als een ander (API) het koos
       implementId = iid;
@@ -211,7 +220,7 @@
       return;
     }
     if (down && k === 'Escape') {
-      if (showRobotUi) showRobotUi = false; else togglePause();
+      if (robotUi) robotUi = null; else togglePause();
       return;
     }
     if (paused) return;
@@ -223,7 +232,12 @@
     }
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', ' '].includes(k)) return;
     e.preventDefault();
-    if (k === ' ' && down) { post('/api/agbot/stop').catch(() => {}); keys.clear(); return; }
+    if (k === ' ' && down) {             // stop: de sim-robot, en de echte robot die je volgt
+      post('/api/agbot/stop').catch(() => {});
+      if (followId) post(`/api/fleet/${followId}/stop`).catch((err) => toast('fout', `Stop: ${err.message || err}`));
+      keys.clear();
+      return;
+    }
     if (down) keys.add(k); else keys.delete(k);
   }
 
@@ -284,7 +298,7 @@
 
   function toMainMenu() {
     if (!wasPaused) post('/api/sim/pause', { paused: false }).catch(() => {});
-    paused = false; tab = ''; showRobotUi = false;
+    paused = false; tab = ''; robotUi = null;
     screen = 'menu';
     setCam('rond');
   }
@@ -317,6 +331,32 @@
   onDestroy(() => { stopState?.(); w3d?.dispose(); });
 
   const r = $derived(st?.robot);
+  // Vloot: de robot die je volgt levert de stand voor de camera, de rijmeters en de kaart
+  const fleetRobots = $derived(st?.fleet?.robots ?? []);
+  const live = $derived(followId ? fleetRobots.find((x) => x.id === followId) ?? null : null);
+  const others = $derived(fleetRobots.filter((x) => x.enabled && x.pose?.in_world)
+    .map((x) => ({ id: x.id, name: x.name, color: x.online ? x.color : '#5f717a', x: x.pose.x, y: x.pose.y, heading: x.pose.heading })));
+  const hudRobot = $derived(live?.telemetry ? { speed_kmh: live.telemetry.speed_kmh, heading: live.telemetry.heading ?? 0,
+    wheel_left_deg: live.telemetry.wheel_left_deg ?? 0, wheel_right_deg: live.telemetry.wheel_right_deg ?? 0, live: live.name } : r);
+  const hudBattery = $derived(live ? (live.telemetry ? { soc: live.telemetry.battery_soc, v: live.telemetry.battery_v } : null)
+    : st?.battery);
+  const liveTone = $derived(!live ? '' : !live.online || live.telemetry?.fault ? 'bad'
+    : live.telemetry?.geofence || live.telemetry?.fix !== 4 ? 'warn' : live.telemetry?.mode === 'idle' ? 'idle' : 'go');
+  const liveStatus = $derived(!live ? '' : !live.online ? 'geen verbinding' : live.telemetry.fault ? `fout: ${live.telemetry.fault}`
+    : live.telemetry.geofence ? `geofence: ${live.telemetry.geofence}`
+    : live.telemetry.message || live.telemetry.state || { idle: 'staat stil', manual: 'rijdt handmatig' }[live.telemetry.mode] || live.telemetry.mode);
+  $effect(() => { if (followId && st?.fleet && !fleetRobots.some((x) => x.id === followId)) followId = null; });
+  $effect(() => { const id = followId; w3d?.setFollow(id); });
+
+  function follow(id) {
+    followId = id;
+    if (map2d) mapFollow = true; else setCam('volg');
+  }
+
+  function focusRobot(x) {
+    w3d.focus(x.pose.x, x.pose.y, 60);
+    mapRef?.centerOn(x.pose.x, x.pose.y);
+  }
   const simTime = $derived.by(() => {
     if (!st) return '0:00';
     const h = Math.floor(st.t / 3600), m = Math.floor((st.t % 3600) / 60), s = Math.floor(st.t % 60);
@@ -359,7 +399,8 @@
     onWorldCreated={refreshWorlds} />
 {:else}
   {#if map2d}
-    <FieldMap2D bind:this={mapRef} bind:follow={mapFollow} {scene} robot={r} {mission} trail={trailXY} doneSwaths={done}
+    <FieldMap2D bind:this={mapRef} bind:follow={mapFollow} {scene} robot={r} {others}
+      center={live?.pose?.in_world ? live.pose : null} {mission} trail={trailXY} doneSwaths={done}
       current={ab?.ab_active ? ab.current_swath : null} selected={selectedField} path={plannedPath} points={points2d}
       starts={startPoints} activeStart={mission?.start_point?.id ?? null}
       layers={settings} onPick={pick} onSelect={(id) => { if (!placingStart) selectedField = id; }}
@@ -368,8 +409,17 @@
   {#if settings.hud}
     <!-- Linksboven: waar ben ik en hoe gaat het met de robot -->
     <div class="panel tl">
-      <div class="eyebrow">{mission ? (mission.kind === 'veldmissie' ? 'Veldmissie' : 'AB-missie') : 'Wereld'}</div>
+      <div class="eyebrow">{live ? 'Live · echte robot' : mission ? (mission.kind === 'veldmissie' ? 'Veldmissie' : 'AB-missie') : 'Wereld'}</div>
       <div class="title">{title ?? 'OpenAgbot FieldSim'}</div>
+      {#if live}
+        <div class="chips livebar">
+          <span class="chip live" style="--c:{live.color}"><i></i>Live · {live.name}</span>
+          <span class="chip {liveTone}"><i></i>{liveStatus}</span>
+          {#if live.online}<span class="chip plain">{live.telemetry.fix_label || 'geen fix'}{#if !live.pose?.in_world} · buiten deze wereld{/if}</span>{/if}
+          <button class="danger" disabled={!live.online}
+            onclick={() => post(`/api/fleet/${live.id}/stop`).catch((e) => toast('fout', `Stop: ${e.message || e}`))}>Stop</button>
+        </div>
+      {:else}
       <div class="chips">
         <span class="chip {statusTone}"><i></i>{status}</span>
         <span class="chip {gnssTone}"><i></i>{st?.gnss?.connected
@@ -377,6 +427,7 @@
         <span class="chip plain">{surfaceLabel[r?.surface] ?? r?.surface ?? '-'}{#if r?.pitch !== undefined}
           · helling {r.pitch.toFixed(1)}° · dwars {r.roll.toFixed(1)}°{/if}</span>
       </div>
+      {/if}
     </div>
 
     <!-- Dok met de panelen -->
@@ -387,7 +438,8 @@
         </button>
       {/each}
       <span class="sep"></span>
-      <button class:active={showRobotUi} onclick={() => (showRobotUi = !showRobotUi)} title="De echte webinterface van de robot">
+      <button class:active={!!robotUi} disabled={!st?.agbot?.url && !live} title="De echte webinterface van de robot"
+        onclick={() => (robotUi = robotUi ? null : live ? { name: live.name, url: live.url } : { name: 'de sim-robot', url: st.agbot.url })}>
         <Icon name="robot" /><span>Robot-UI</span>
       </button>
     </div>
@@ -399,7 +451,10 @@
           <button class="ghost" onclick={() => (tab = '')} title="Sluiten"><Icon name="close" size={16} /></button>
         </div>
         <div class="drawer-body">
-          {#if tab === 'missie'}
+          {#if tab === 'vloot'}
+            <FleetPanel fleet={st?.fleet} simRobot={r} {followId} onFollow={follow} onFocus={focusRobot} {toast}
+              onOpenUi={(x) => (robotUi = { name: x.name, url: x.url })} />
+          {:else if tab === 'missie'}
             <MissionPanel {scene} bind:selected={selectedField} {startPoints} bind:placingStart onStartPoints={setStarts}
               onPlan={(p) => { mission = p; w3d.setMission(p); planVersion = null; if (p?.kind === 'veldmissie') { order = []; w3d.setPlannedPath(null); plannedPath = null; } }}
               onStarted={() => { w3d.clearTrail(); trailXY = []; setCam('volg'); }}
@@ -483,7 +538,8 @@
       </div>
     {/if}
 
-    <DriveHud robot={r} battery={st?.battery} target={ab?.ab_active || ab?.navigator_active ? ab?.target_speed_kmh : null} />
+    <DriveHud robot={hudRobot} battery={hudBattery}
+      target={!live && (ab?.ab_active || ab?.navigator_active) ? ab?.target_speed_kmh : null} />
 
     <!-- Rechtsonder: minikaart en missie -->
     <div class="panel br">
@@ -500,7 +556,7 @@
           {#if mapInfo?.field}<span><b>{mapInfo.field.name}</b> · {mapInfo.field.area_ha.toFixed(2)} ha</span>{/if}
         </div>
       {:else}
-        <MiniMap {scene} robot={r} {mission} trail={trailXY} doneSwaths={done} current={ab?.ab_active ? ab.current_swath : null}
+        <MiniMap {scene} robot={r} {others} {mission} trail={trailXY} doneSwaths={done} current={ab?.ab_active ? ab.current_swath : null}
           starts={startPoints} />
       {/if}
       <div class="meta num">
@@ -521,7 +577,7 @@
       </div>
     {:else if !tab}
       <div class="panel bl hint">
-        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> rijden</span>
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> {live ? 'sim-robot rijden' : 'rijden'}</span>
         <span><kbd>Spatie</kbd> stop</span>
         <span><kbd>C</kbd> camera</span>
         <span><kbd>M</kbd> kaart</span>
@@ -532,12 +588,12 @@
     <div class="panel hudhint">HUD verborgen · <kbd>H</kbd> toont hem weer</div>
   {/if}
 
-  {#if showRobotUi && st?.agbot?.url}
+  {#if robotUi}
     <div class="robot-ui panel">
-      <div class="row head"><Icon name="robot" /><b>Webinterface van de robot</b>
-        <span class="muted small">{st.agbot.url} · de echte OpenAgbot-frontend</span>
-        <span class="grow"></span><button class="ghost" onclick={() => (showRobotUi = false)} title="Sluiten (Esc)"><Icon name="close" size={16} /></button></div>
-      <iframe title="OpenAgbot" src={st.agbot.url}></iframe>
+      <div class="row head"><Icon name="robot" /><b>Webinterface van {robotUi.name}</b>
+        <span class="muted small">{robotUi.url} · de eigen frontend van de robot</span>
+        <span class="grow"></span><button class="ghost" onclick={() => (robotUi = null)} title="Sluiten (Esc)"><Icon name="close" size={16} /></button></div>
+      <iframe title="OpenAgbot" src={robotUi.url}></iframe>
     </div>
   {/if}
 
@@ -572,9 +628,14 @@
   .chip.bad { background: rgba(255, 90, 77, 0.2); color: #ffc9c4; }
   .chip.bad i { background: var(--red); box-shadow: 0 0 7px var(--red); }
   .chip.plain { color: var(--muted); }
+  .chip.live { background: color-mix(in srgb, var(--c) 22%, transparent); font-weight: 600; }
+  .chip.live i { background: var(--c); box-shadow: 0 0 7px var(--c); animation: pulse 1.6s infinite; }
+  .livebar { align-items: center; }
+  .livebar button { min-height: 24px; padding: 1px 10px; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
 
   .dock { top: 118px; left: var(--margin); padding: 6px; display: flex; flex-direction: column; gap: 3px; width: 74px; }
-  .dock button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 2px 5px; min-height: 0;
+  .dock button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 4px; min-height: 0;
     background: transparent; border-color: transparent; color: var(--muted); }
   .dock button span { font-family: var(--display); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
   .dock button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.08); }

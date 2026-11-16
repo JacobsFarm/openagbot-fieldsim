@@ -9,6 +9,7 @@ import urllib.request
 
 from openagbot_fieldsim.agbot.runtime import AgbotProcess, load_sim_config, runtime_config
 from openagbot_fieldsim.engine import Ports, Simulation
+from openagbot_fieldsim.fleet import FleetManager
 from openagbot_fieldsim.settings import Settings
 from openagbot_fieldsim.world.model import World, load_world
 
@@ -27,6 +28,8 @@ class SimApp:
         self.missions: dict[str, dict] = {}      # laatst geplande missie per veld (voor de UI)
         self.implement_id: str | None = None     # gekozen aanbouwdeel, blijft bij een andere wereld
         self.build_status: dict = {"running": False, "world": None, "log": [], "error": None}
+        # Echte robots die de sim live volgt (fleet.json naast settings.json)
+        self.fleet = FleetManager(os.path.join(settings.home, "fleet.json"), autostart=settings.fleet_autostart)
 
     # ------------------------------------------------------------------ werelden
     def list_worlds(self) -> list[dict]:
@@ -109,6 +112,7 @@ class SimApp:
         self.start_agbot()
 
     def shutdown(self) -> None:
+        self.fleet.shutdown()
         self.agbot.stop()
         if self.sim:
             self.sim.stop()

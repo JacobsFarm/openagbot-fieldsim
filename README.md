@@ -25,6 +25,8 @@ the real robot, all before you go out to the field. Design notes and background 
 - [Install and run](#install-and-run)
 - [Tour](#tour)
 - [Features](#features)
+- [Fleet: following real robots](#fleet-following-real-robots)
+- [Lanes: fixed driving lines with a zone](#lanes-fixed-driving-lines-with-a-zone)
 - [Worlds](#worlds)
 - [World editor](#world-editor)
 - [Implements](#implements)
@@ -159,6 +161,65 @@ Ride logs of simulated runs go to `runtime/agbot/data/logs/` (same CSV format as
 - **World**: open worlds, add a real location and build it, toggle layers.
 - **Aerial photo**: under *Weergave*, *Luchtfoto (PDOK)* drapes the aerial photo over the 3D terrain (tiles of 2048
   pixels, cached in `worlds/<name>/cache/luchtfoto`). Only the world's bounding box is sent to PDOK.
+
+## Fleet: following real robots
+
+The sim doubles as a small fleet manager. Add the address of a robot in the *Vloot* (fleet) tab and it shows up
+live in the loaded world, next to the simulated robot: its model at the measured position and heading, a name tag,
+its driven track, and its arrow on the minimap and the 2D map. The robot's own web interface keeps working as
+before; the sim only reads along over the same HTTP API.
+
+```
+phone / tablet ──► robot web interface (port 8000) ◄── FieldSim fleet (5 Hz telemetry, commands on request)
+```
+
+| In the fleet tab | What |
+| --- | --- |
+| Status per robot | online / offline, speed, GNSS fix, battery, connection delay, mission progress, faults, geofence |
+| **Follow** | camera, drive HUD and map follow that robot; the top-left panel shows `LIVE` with a stop button |
+| **Stop** / **Stop all** | emergency stop for one robot or the whole fleet (also `Space` while following) |
+| Missions on the robot | start, resume or stop a mission that is stored on the robot (asks for confirmation: it drives off) |
+| Send safety map | ditches and no-go zones of the loaded world to the robot's geofence |
+| Target for missions | *Send to the robot* in the mission and points panels then goes to this robot |
+| Robot UI | the robot's own web interface in a window inside the sim |
+
+Things to know:
+
+- **The world must contain the field.** Positions are converted from lat/lon to the loaded world. A robot outside
+  it is listed with a warning and not drawn; open (or build) the world of the place where it drives.
+- **Run the sim on a laptop or PC** on the same network as the robot (WiFi or the robot's hotspot), not on the
+  Jetson: the 3D view would take CPU and GPU the control loop needs.
+- **Reading is always safe.** The sim never drives a real robot by itself; the arrow keys only drive the simulated
+  robot. Driving starts only from a mission you start and confirm.
+- The list is stored in `fleet.json` next to `settings.json` (contains addresses, not in git). A robot that drops
+  out stays on the map as offline at its last position and reconnects by itself.
+
+No robot at hand? `python tools/demo_robot.py` starts an imitation robot that drives a circle near the yard of the
+example world; add `http://127.0.0.1:8101` in the fleet tab.
+
+Other kinds of robots: write a subclass of `RobotAdapter` (`openagbot_fieldsim/fleet/adapters.py`) that translates
+its API to `Telemetry` and call `register("kind", Class)`. The manager, the API (`/api/fleet...`, see
+`api/fleet_api.py`) and the UI work with any registered kind.
+
+## Lanes: fixed driving lines with a zone
+
+A **lane** (*rijpad*) is a fixed line the robot follows between fields and across the yard, with a zone around it.
+Draw one in the world editor as a crossing of the kind `rijpad`: the line is the path, the width is the zone.
+
+| Rule | What happens |
+| --- | --- |
+| Strict line | Outside the fields the robot drives on the drawn line, like an AB line. Only corners are rounded on its turning circle. |
+| Zone | The line plus half the width on each side is the only place outside the fields where it may be during the mission. The mission file carries the zone as allowed area and as the width of the segment; the robot stops when it leaves it. |
+| Picking up | Robot inside a zone: it picks up the line by itself and continues. Robot in a field: it takes the shortest way through the field to the lane. Anywhere else the planner refuses and tells you how far the nearest lane is: drive it there by hand first. |
+| Turns | A corner or junction whose rounded turn does not fit inside the zones is refused, with the reason (run-up needed, turning circle). Make the corner wider or the zone broader there. |
+| Network | Lanes that touch or cross are connected. A lane that runs into a field connects that field. Gates and dams may end on a lane. |
+| Safety | A lane never opens a ditch, dike or road: crossing one still needs a dam, culvert, bridge or road crossing, with the lane drawn over it. |
+
+As soon as a world has lanes, free driving over the yard and farm tracks is switched off (`transit_mode: auto`).
+Farm setting `transit_mode` can force `rijpaden` (strict) or `vrij` (free areas and lanes together).
+
+In the farm mission panel *route begint* picks where the route starts: the world's start spot, where the simulated
+robot stands now, or where a real robot from the fleet stands now.
 
 ## Worlds
 
@@ -303,16 +364,20 @@ Inno Setup. The OpenAgbot backend runs as a second process of the same .exe (`op
 | `openagbot_fieldsim/missions/field_plan.py` | field mission: headland rounds, swaths, order, turns, coverage; outputs `veldmissie.json` and `waypoints.json` |
 | `openagbot_fieldsim/missions/safety.py` | hazards (stop / avoid), route check before driving, monitoring while driving, geofence for the robot |
 | `openagbot_fieldsim/missions/farm_route.py` | route graph (fields, drive areas, crossings), farm mission, crossing suggestions |
+| `openagbot_fieldsim/missions/lanes.py` | lanes: zone around a fixed line, rounding corners on the turning circle |
 | `openagbot_fieldsim/missions/points.py` | point missions: import, test weeds, shortest route (nearest neighbour + 2-opt), `waypoints.json` |
 | `openagbot_fieldsim/implements/` | implements: catalogue (source, mounting, width), behaviour (strip / points), `assets/` (glb from FreeCAD) |
 | `openagbot_fieldsim/api/` | HTTP/WebSocket API and scene export for the UI |
 | `openagbot_fieldsim/api/field_api.py` | API for field missions (plan, download, drive in the sim, send to the robot) |
 | `openagbot_fieldsim/api/farm_api.py` | API for the farm mission, the route graph and safety |
+| `openagbot_fieldsim/fleet/` | fleet: robot list (`fleet.json`), one connection per robot, adapters per kind of robot |
+| `openagbot_fieldsim/api/fleet_api.py` | fleet API: add robots, live state, stop, missions, safety map |
 | `openagbot_fieldsim/api/editor_api.py` | editor API: state, save, split/merge/offset, import/export, aerial photo |
 | `tools/import_agopengps.py` | check AgOpenGPS fields and set them up as a new world |
 | `tools/render_field_plan.py` | field mission as SVG/PNG, without the sim |
 | `tools/drive_field_mission.py` | let the real OpenAgbot drive a field mission (no UI) and measure the deviation |
 | `tools/check_boundaries.py` | check field boundaries: BRP (RVO) against the cadastre and water |
+| `tools/demo_robot.py` | imitation robot (OpenAgbot API, drives a circle) to try the fleet without hardware |
 | `tools/export_implements.py` | FreeCAD build scripts -> glb per position + `meta.json` (spindle position, cycle time, dose) |
 | `ui/` | Svelte + three.js, FreeCAD-style theme (`ui/src/theme.js`); `npm run build` -> `openagbot_fieldsim/static` |
 | `packaging/` | PyInstaller spec, build script, Inno Setup |

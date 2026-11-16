@@ -8,6 +8,10 @@ De robot mag op drie soorten plekken rijden:
     zelf tekent (ook min obstakels en de halve breedte);
   - door een doorgang (dam, duiker, brug, hek, oversteek, oprit): de rijlijn die je tekent.
 
+  - over een rijpad (doorgang van de soort `rijpad`, zie missions/lanes.py): een vaste lijn met een zone eromheen.
+    Zodra er rijpaden getekend zijn rijdt hij buiten de velden ALLEEN nog over rijpaden en doorgangen (`strict`);
+    het vrije rijden over erf en kavelpad vervalt dan. Boerderij-instelling `transit_mode`: auto | rijpaden | vrij.
+
 Een veld of rijgebied verlaat hij ALLEEN via een doorgang. Twee velden die tegen elkaar liggen zijn dus niet
 vanzelf verbonden: zonder doorgang rijdt de robot er niet tussendoor en dus ook nooit ongemerkt over een sloot.
 `suggest_passages` stelt doorgangen voor op plekken waar twee gebieden dicht bij elkaar liggen zonder sloot, hek of
@@ -33,6 +37,7 @@ from openagbot_fieldsim.missions.boundary import effective_clearance, field_area
 from openagbot_fieldsim.missions.dubins import dubins_all
 from openagbot_fieldsim.missions.field_plan import (FORMAT, VERSION, FieldPlanner, PlanSettings, Segment, _compass,
                                                     _poly_json, _r, robot_turn_radius)
+from openagbot_fieldsim.missions.lanes import dedupe, fillet, is_lane, lane_corridor, turn_text
 from openagbot_fieldsim.missions.safety import check_path, geofence_export, hazards, passage_corridor, precheck_segments
 
 TRANSIT_SURFACES = ("yard", "paved", "track")
@@ -171,20 +176,43 @@ class Region:
 
 
 class FarmGraph:
-    def __init__(self, world, settings: PlanSettings | None = None, half_width_m: float | None = None):
+    def __init__(self, world, settings: PlanSettings | None = None, half_width_m: float | None = None,
+                 turn_radius_m: float | None = None, start_xy: tuple[float, float] | None = None):
         self.world = world
         self.s = settings or PlanSettings()
-        self.half = half_width_m if half_width_m is not None else max(self.s.work_width_m / 2.0,
+        self.R = float(turn_radius_m or self.s.turn_radius_m or robot_turn_radius(1.2, 1.0, 30.0) * self.s.turn_margin)
+        # Onderweg telt de transportbreedte, niet de werkbreedte (die kan een camerabeeld of neergeklapte boom zijn)
+        self.half = half_width_m if half_width_m is not None else max((self.s.transport_width_m or 0.0) / 2.0,
                                                                      self.s.robot_half_width_m)
         self.clr = effective_clearance(world, self.s.clearance)
         self.warnings: list[str] = []
         self.skipped: dict[str, str] = {}             # veld -> waarom er geen rijgebied is
         self.regions: list[Region] = []
         self.nodes: dict = {}                         # (passage-id, kant) -> {"xy", "region", "passage", "side"}
-        self.passages = {p.id: p for p in world.passages}
+        # Doorgangen (dam, hek, ...) en de STUKKEN van rijpaden (id "<rijpad>#<n>") waar de route over loopt
+        self.passages = {p.id: p for p in world.passages if not is_lane(p)}
         self.unusable: dict[str, str] = {}
+        # Rijpaden: vaste lijnen met een zone. Zijn ze er, dan rijdt de robot buiten de velden alleen daarover.
+        mode = (getattr(world, "farm_settings", None) or {}).get("transit_mode", "auto")
+        lane_src = [p for p in world.passages if is_lane(p)]
+        self.strict = mode == "rijpaden" or (mode != "vrij" and bool(lane_src))
+        self.lanes: dict = {}                         # id -> rijpad (bruikbaar)
+        self.piece_lane: dict[str, str] = {}          # stuk-id -> rijpad-id
+        self.lane_notes: dict[str, str] = {}          # rijpad dat maar deels bruikbaar is -> waarom
+        self.lane_ok = None                           # waar robot en werktuig op een rijpad mogen komen
+        self.start = None                             # (gebied, punt) waar de route begint (alleen bij start_xy)
+        self.start_error: str | None = None
+        self._lines: dict[str, list] = {}
+        self._splits: dict[str, list] = {}
+        self._jxy: dict = {}
+        self._uf: dict = {}
+        self._turns: dict = {}
         self._build_regions()
+        self._prepare_lanes(lane_src)
         self._build_nodes()
+        if start_xy is not None:
+            self._locate_start(start_xy)
+        self._finish_lanes()
 
     # ------------------------------------------------------------------ gebieden
     def _build_regions(self):
@@ -201,11 +229,11 @@ class FarmGraph:
                 continue
             self.regions.append(Region(f"veld:{f.id}", "veld", g, f.name, f.id))
         polys = []
-        for sf in w.surfaces:
+        for sf in ([] if self.strict else w.surfaces):
             if sf.kind in TRANSIT_SURFACES and len(sf.xy) >= 3:
                 g = Polygon(sf.xy)
                 polys.append(g if g.is_valid else g.buffer(0))
-        for z in w.zones:
+        for z in ([] if self.strict else w.zones):
             if z.klass in ("werken", "alleen_rijden") and len(z.xy) >= 3:
                 g = Polygon(z.xy)
                 polys.append(g if g.is_valid else g.buffer(0))
@@ -278,20 +306,22 @@ class FarmGraph:
         return best[1], self.regions[best[1]].snap(best[2] or end)
 
     def _build_nodes(self):
-        for p in self.world.passages:
+        for p in self.passages.values():
             name = p.name or p.id
             if len(p.xy) < 2:
                 self.unusable[p.id] = "geen rijlijn"
                 continue
             if p.width_m < 2.0 * self.half + 0.1:
-                self.unusable[p.id] = (f"te smal: {p.width_m:.1f} m voor robot/werktuig van "
+                self.unusable[p.id] = (f"te smal: {p.width_m:.1f} m voor transportbreedte "
                                        f"{2.0 * self.half:.1f} m")
                 self.warnings.append(f"doorgang {name}: {self.unusable[p.id]}")
                 continue
-            a = self._attach(p.xy[0], p.xy[1])
-            b = self._attach(p.xy[-1], p.xy[-2], a[0] if a else None)
+            a = self._attach(p.xy[0], p.xy[1]) or self._attach_lane(p.xy[0])
+            b = self._attach(p.xy[-1], p.xy[-2], a[0] if a else None) or self._attach_lane(p.xy[-1])
             if a is None or b is None:
-                self.unusable[p.id] = "sluit niet aan op een veld of rijgebied (teken de lijn van veld tot veld)"
+                self.unusable[p.id] = ("sluit niet aan op een veld of rijpad (teken de lijn van veld tot veld, of tot "
+                                       "op een rijpad)" if self.strict else
+                                       "sluit niet aan op een veld of rijgebied (teken de lijn van veld tot veld)")
                 self.warnings.append(f"doorgang {name}: {self.unusable[p.id]}")
                 continue
             line = [a[1], *[(q[0], q[1]) for q in p.xy], b[1]]
@@ -303,6 +333,222 @@ class FarmGraph:
                 continue
             self.nodes[(p.id, 0)] = {"xy": a[1], "region": a[0], "passage": p.id, "side": 0}
             self.nodes[(p.id, 1)] = {"xy": b[1], "region": b[0], "passage": p.id, "side": 1}
+
+    # ------------------------------------------------------------------ rijpaden
+    def _key(self, xy):
+        return (round(xy[0], 2), round(xy[1], 2))
+
+    def _find(self, k):
+        while self._uf.get(k, k) != k:
+            self._uf[k] = self._uf.get(self._uf[k], self._uf[k])
+            k = self._uf[k]
+        return k
+
+    def _split(self, lane_id: str, xy) -> tuple:
+        """Knoop op een rijpad op het punt van de lijn dat het dichtst bij `xy` ligt. Geeft de sleutel van de knoop."""
+        line = LineString(self._lines[lane_id])
+        d = line.project(Point(xy))
+        k = self._key(xy)
+        self._jxy.setdefault(k, (float(xy[0]), float(xy[1])))
+        self._uf.setdefault(k, k)
+        self._splits[lane_id].append((d, k))
+        return k
+
+    def _nearest_lane(self, xy, skip: str | None = None):
+        """(afstand, rijpad-id, punt op de lijn) van het dichtstbijzijnde bruikbare rijpad, of None."""
+        p = Point(xy)
+        best = None
+        for lid, pts in self._lines.items():
+            if lid == skip:
+                continue
+            line = LineString(pts)
+            d = line.distance(p)
+            if best is None or d < best[0]:
+                q = line.interpolate(line.project(p))
+                best = (d, lid, (q.x, q.y))
+        return best
+
+    def _prepare_lanes(self, lane_src) -> None:
+        """Rijpaden keuren en hun lijnen aan elkaar knopen: kruisingen, T-splitsingen en waar ze een veld in gaan."""
+        for p in lane_src:
+            name = p.name or p.id
+            pts = dedupe([(q[0], q[1]) for q in p.xy])
+            if len(pts) < 2 or _len(pts) < 0.5:
+                self.unusable[p.id] = "geen rijlijn"
+            elif p.width_m < 2.0 * self.half + 0.1:
+                self.unusable[p.id] = (f"zone te smal: {p.width_m:.1f} m voor transportbreedte "
+                                       f"{2.0 * self.half:.1f} m")
+            else:
+                bad = check_path(self.world, pts, self.half, self.s.date, self.s.dike_mode)
+                if bad:
+                    what = ", ".join(sorted({v["label"] for v in bad}))
+                    self.unusable[p.id] = (f"de rijlijn raakt {what}; verleg het rijpad of teken daar een doorgang "
+                                           "(dam, duiker, brug, oversteek)")
+            if p.id in self.unusable:
+                self.warnings.append(f"rijpad {name}: {self.unusable[p.id]}")
+                continue
+            self.lanes[p.id] = p
+            self._lines[p.id] = pts
+            self._splits[p.id] = []
+        if not self.lanes:
+            return
+        fields = [r.geom.buffer(self.half + 0.05, join_style="mitre") for r in self.regions if r.kind == "veld"]
+        self.lane_ok = unary_union([*(lane_corridor(p) for p in self.lanes.values()), *fields]).buffer(0.05)
+        prepare(self.lane_ok)
+        # Een einde dat binnen de zone van een ander rijpad ligt sluit daarop aan: de lijn loopt door tot die lijn
+        for lid, p in self.lanes.items():
+            for end in (0, -1):
+                near = self._nearest_lane(self._lines[lid][end], skip=lid)
+                if near and 0.05 < near[0] <= self.lanes[near[1]].width_m / 2.0:
+                    if end == 0:
+                        self._lines[lid].insert(0, near[2])
+                    else:
+                        self._lines[lid].append(near[2])
+        ids = list(self.lanes)
+        for lid in ids:
+            self._split(lid, self._lines[lid][0])
+            self._split(lid, self._lines[lid][-1])
+        for i, a in enumerate(ids):                              # kruisingen en T-splitsingen
+            la = LineString(self._lines[a])
+            for b in ids[i + 1:]:
+                lb = LineString(self._lines[b])
+                for q in _points(la.intersection(lb)):
+                    self._split(a, q)
+                    self._split(b, q)
+                for x, y in ((a, b), (b, a)):                    # einde van x op de lijn van y
+                    for end in (self._lines[x][0], self._lines[x][-1]):
+                        if LineString(self._lines[y]).distance(Point(end)) < 0.03:
+                            self._split(y, end)
+        for lid in ids:                                          # waar het rijpad een veld in of uit gaat
+            line = LineString(self._lines[lid])
+            for r in self.regions:
+                if r.kind == "veld" and line.intersects(r.geom):
+                    for q in _points(line.intersection(r.geom.boundary)):
+                        self._split(lid, q)
+
+    def _attach_lane(self, end):
+        """Einde van een doorgang dat op een rijpad uitkomt: knoop op die lijn. (("K", sleutel), punt) of None."""
+        near = self._nearest_lane(end)
+        if near is None or near[0] > self.lanes[near[1]].width_m / 2.0 + 0.5:
+            return None
+        return ("K", self._split(near[1], near[2])), near[2]
+
+    def _locate_start(self, xy) -> None:
+        """Waar begint de route? Met rijpaden: in een veld (vrij naar het rijpad), of binnen de zone van een rijpad
+        (hij pakt de lijn daar op). Anders weigert de planner: eerst met de hand naar een rijpad rijden."""
+        if not self.strict:
+            return
+        p = Point(xy)
+        for i, r in enumerate(self.regions):
+            if r.kind == "veld" and r.geom.buffer(self.half + 0.3, join_style="mitre").covers(p):
+                self.start = (i, r.snap(xy))
+                return
+        near = self._nearest_lane(xy)
+        if near is not None and near[0] <= self.lanes[near[1]].width_m / 2.0:
+            self.start = (("K", self._split(near[1], near[2])), near[2])
+            return
+        if near is None:
+            self.start_error = ("de robot staat niet in een veld en er is geen bruikbaar rijpad: teken een rijpad "
+                                "(doorgang van de soort rijpad) van het erf naar het veld")
+        else:
+            lane = self.lanes[near[1]]
+            self.start_error = (f"de robot staat niet in een veld en niet op een rijpad: rijpad "
+                                f"'{lane.name or lane.id}' ligt {near[0]:.1f} m verderop en zijn zone is "
+                                f"{lane.width_m / 2.0:.1f} m aan elke kant. Rijd hem met de hand tot in de zone; "
+                                "daar pakt hij de lijn zelf op")
+
+    def _region_of(self, key):
+        """Gebied van een knoop op een rijpad: het veld waar hij in ligt, anders de kruising zelf ("J:x,y")."""
+        root = self._find(key)
+        xy = self._jxy[root]
+        p = Point(xy)
+        for i, r in enumerate(self.regions):
+            if r.kind == "veld" and r.ok.covers(p):
+                return i
+        return f"J:{root[0]},{root[1]}"
+
+    def _finish_lanes(self) -> None:
+        """Rijpaden opknippen in stukken tussen de knopen; elk stuk is een kant van de graaf, net als een doorgang."""
+        for lid, p in self.lanes.items():
+            pts = self._lines[lid]
+            line = LineString(pts)
+            cum = [0.0]
+            for a, b in zip(pts, pts[1:]):
+                cum.append(cum[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+            splits = sorted(self._splits[lid])
+            merged = [splits[0]]
+            for d, k in splits[1:]:
+                if d - merged[-1][0] < 0.3:                      # zelfde plek: één knoop
+                    self._uf[self._find(k)] = self._find(merged[-1][1])
+                else:
+                    merged.append((d, k))
+            self._splits[lid] = merged
+        for lid, p in self.lanes.items():
+            pts = self._lines[lid]
+            line = LineString(pts)
+            cum = [0.0]
+            for a, b in zip(pts, pts[1:]):
+                cum.append(cum[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+            merged = self._splits[lid]
+            for n, ((d0, k0), (d1, k1)) in enumerate(zip(merged, merged[1:])):
+                a, b = line.interpolate(d0), line.interpolate(d1)
+                piece = dedupe([(a.x, a.y), *[q for q, c in zip(pts, cum) if d0 + 0.05 < c < d1 - 0.05], (b.x, b.y)])
+                pid = f"{lid}#{n}"
+                smooth, bad = fillet(piece, self.R, self.s.point_step_m)
+                reason = None
+                if bad:
+                    reason = turn_text(bad[0], self.R)
+                elif not self.lane_ok.covers(LineString(smooth).buffer(self.half)):
+                    reason = (f"een bocht komt met draaicirkel {self.R:.1f} m buiten de zone van "
+                              f"{max(p.width_m, p.bend_width_m or 0.0):.1f} m breed; geef het rijpad een "
+                              f"grotere 'breedte in de bocht'")
+                if reason:
+                    self.unusable[pid] = reason
+                    if lid not in self.lane_notes:
+                        self.lane_notes[lid] = f"{reason}; maak de bocht ruimer of de zone daar breder"
+                        self.warnings.append(f"rijpad {p.name or p.id}: {self.lane_notes[lid]}")
+                    continue
+                self.passages[pid] = replace(p, id=pid, xy=piece)
+                self.piece_lane[pid] = lid
+                self.nodes[(pid, 0)] = {"xy": (a.x, a.y), "region": self._region_of(k0), "passage": pid, "side": 0}
+                self.nodes[(pid, 1)] = {"xy": (b.x, b.y), "region": self._region_of(k1), "passage": pid, "side": 1}
+        for n in self.nodes.values():                            # doorgang-einden die op een rijpad uitkwamen
+            if isinstance(n["region"], tuple):
+                n["region"] = self._region_of(n["region"][1])
+        if self.start is not None and isinstance(self.start[0], tuple):
+            self.start = (self._region_of(self.start[0][1]), self.start[1])
+
+    def _run(self, pid: str, from_side: int, reach_m: float | None = None) -> list:
+        """Punten vanaf knoop (pid, from_side) langs het rijpad, door over de volgende stukken van hetzelfde rijpad,
+        tot `reach_m` (standaard ruim genoeg voor een bocht)."""
+        reach = reach_m if reach_m is not None else 4.0 * self.R + 2.0
+        lid, n = pid.rsplit("#", 1)
+        n, step = int(n), (1 if from_side == 0 else -1)
+        pts: list = []
+        while f"{lid}#{n}" in self.passages and _len(pts) < reach:
+            pts += self.passage_points(f"{lid}#{n}", from_side)
+            n += step
+        return dedupe(pts)
+
+    def _turn_ok(self, ka, kb) -> bool:
+        """Past de bocht van stuk `ka` (aangekomen op die knoop) naar stuk `kb` (vertrek) binnen de zones?"""
+        key = (ka, kb)
+        if key not in self._turns:
+            # Niet alleen de twee stukken zelf: een rijpad is ook geknipt waar een hek of ander rijpad erop
+            # uitkomt, en de bocht mag de lengte van het hele rijpad voor en na de kruising gebruiken.
+            path = dedupe([*self._run(ka[0], ka[1])[::-1], *self._run(kb[0], kb[1])])
+            smooth, bad = fillet(path, self.R, self.s.point_step_m)
+            self._turns[key] = not bad and self.lane_ok.covers(LineString(smooth).buffer(self.half))
+        return self._turns[key]
+
+    def _dist(self, region, a, b) -> float:
+        """Afstand binnen een gebied; op een kruising van rijpaden liggen de knopen op dezelfde plek."""
+        if isinstance(region, str):
+            return math.hypot(a[0] - b[0], a[1] - b[1])
+        return self.regions[region].distance(a, b)
+
+    def region_name(self, region) -> str:
+        return "kruising van rijpaden" if isinstance(region, str) else self.regions[region].name
 
     def passage_points(self, pid: str, from_side: int) -> list:
         p = self.passages[pid]
@@ -325,7 +571,7 @@ class FarmGraph:
         pq: list = []
         for key, n in self.nodes.items():
             if n["region"] == region:
-                d = self.regions[region].distance(xy, n["xy"])
+                d = self._dist(region, xy, n["xy"])
                 if d < math.inf:
                     dist[key] = d
                     prev[key] = "S"
@@ -340,14 +586,20 @@ class FarmGraph:
             pid, side = key
             if self._may_pass(pid, side):                        # door de doorgang naar de andere kant
                 other = (pid, 1 - side)
-                nd = d + _len(self.passage_points(pid, side)) + PASSAGE_PENALTY_M
+                nd = d + _len(self.passage_points(pid, side)) + (0.0 if pid in self.piece_lane else PASSAGE_PENALTY_M)
                 if other not in done and nd < dist.get(other, math.inf):
                     dist[other], prev[other] = nd, key
                     heapq.heappush(pq, (nd, other))
+            junction = isinstance(n["region"], str)
+            came = prev[key] == (pid, 1 - side)                  # over dit stuk hier aangekomen
+            if junction and not came:
+                continue                                         # op een kruising alleen het eigen stuk op
             for k2, n2 in self.nodes.items():                    # binnen het gebied naar een andere doorgang
                 if k2 in done or n2["region"] != n["region"] or k2[0] == pid:
                     continue
-                nd = d + self.regions[n["region"]].distance(n["xy"], n2["xy"])
+                if junction and pid in self.piece_lane and k2[0] in self.piece_lane and not self._turn_ok(key, k2):
+                    continue                                     # die bocht past niet binnen de zone
+                nd = d + self._dist(n["region"], n["xy"], n2["xy"])
                 if nd < dist.get(k2, math.inf):
                     dist[k2], prev[k2] = nd, key
                     heapq.heappush(pq, (nd, k2))
@@ -366,41 +618,66 @@ class FarmGraph:
 
     def hops(self, src_region: int, src_xy, dst_region: int, dst_xy, dist: dict, prev: dict):
         """Route als lijst stukken: ("gebied", index, punten) en ("doorgang", id, punten). None = onbereikbaar."""
-        reg = self.regions[dst_region]
+        def path(region, a, b):
+            return None if isinstance(region, str) else self.regions[region].path(a, b)
+
         best = None
         if src_region == dst_region:
-            d = reg.distance(src_xy, dst_xy)
+            d = self._dist(dst_region, src_xy, dst_xy)
             if d < math.inf:
                 best = (d, None)
         for key, n in self.nodes.items():
             if n["region"] == dst_region and key in dist:
-                d = dist[key] + reg.distance(n["xy"], dst_xy)
+                d = dist[key] + self._dist(dst_region, n["xy"], dst_xy)
                 if best is None or d < best[0]:
                     best = (d, key)
         if best is None or best[0] == math.inf:
             return None
         if best[1] is None:
-            return [("gebied", dst_region, reg.path(src_xy, dst_xy))]
+            return [h for h in [("gebied", dst_region, path(dst_region, src_xy, dst_xy))] if h[2] is not None]
         chain = [best[1]]
         while prev[chain[-1]] != "S":
             chain.append(prev[chain[-1]])
         chain.reverse()
         out = []
         first = self.nodes[chain[0]]
-        out.append(("gebied", first["region"], self.regions[first["region"]].path(src_xy, first["xy"])))
+        out.append(("gebied", first["region"], path(first["region"], src_xy, first["xy"])))
         for a, b in zip(chain, chain[1:]):
             if a[0] == b[0]:
                 out.append(("doorgang", a[0], self.passage_points(a[0], a[1])))
             else:
                 r = self.nodes[a]["region"]
-                out.append(("gebied", r, self.regions[r].path(self.nodes[a]["xy"], self.nodes[b]["xy"])))
-        out.append(("gebied", dst_region, reg.path(self.nodes[chain[-1]]["xy"], dst_xy)))
+                out.append(("gebied", r, path(r, self.nodes[a]["xy"], self.nodes[b]["xy"])))
+        out.append(("gebied", dst_region, path(dst_region, self.nodes[chain[-1]]["xy"], dst_xy)))
         return [h for h in out if h[2] is not None and (h[0] == "doorgang" or _len(h[2]) > 0.05)]
 
     def segments(self, hops, label: str, speed_kmh: float, meta: dict | None = None) -> list[Segment]:
         out = []
-        for kind, ref, pts in hops:
-            if kind == "doorgang":
+        i = 0
+        while i < len(hops):
+            kind, ref, pts = hops[i]
+            i += 1
+            if kind == "doorgang" and ref in self.piece_lane:
+                # Opeenvolgende stukken rijpad worden één segment: de lijn, met de bochten afgerond op de draaicirkel.
+                # De robot bewaakt de breedte van het smalste rijpad in het segment.
+                line, ids = list(pts), [self.piece_lane[ref]]
+                while i < len(hops) and hops[i][0] == "doorgang" and hops[i][1] in self.piece_lane:
+                    line += hops[i][2]
+                    if self.piece_lane[hops[i][1]] not in ids:
+                        ids.append(self.piece_lane[hops[i][1]])
+                    i += 1
+                lanes = [self.lanes[k] for k in ids]
+                smooth, bad = fillet(line, self.R, self.s.point_step_m)
+                ok = not bad and self.lane_ok.covers(LineString(smooth).buffer(self.half))
+                narrow = min(lanes, key=lambda q: q.width_m)
+                sg = Segment("doorgang", "rijpad " + " > ".join(q.name or q.id for q in lanes), "omhoog",
+                             min(speed_kmh, *(q.max_speed_kmh for q in lanes)), _with_theta(smooth), ok,
+                             {**(meta or {}), "doorgang": narrow.id, "soort": "rijpad", "rijpaden": ids,
+                              "bevestigen": True if any(q.confirm for q in lanes) else None})
+                if not ok:
+                    sg.meta["reden"] = "bocht past niet binnen de zone van het rijpad"
+                out.append(sg)
+            elif kind == "doorgang":
                 p = self.passages[ref]
                 out.append(Segment("doorgang", f"doorgang {p.name or p.id}", "omhoog",
                                    min(speed_kmh, p.max_speed_kmh), _with_theta(pts), True,
@@ -411,16 +688,42 @@ class FarmGraph:
                                    {**(meta or {}), "gebied": self.regions[ref].name}))
         return out
 
+    def _connects(self, p) -> list[str]:
+        """Namen van de gebieden waar een doorgang of rijpad op aansluit."""
+        if not is_lane(p):
+            return [self.region_name(self.nodes[(p.id, k)]["region"]) for k in (0, 1)] if (p.id, 0) in self.nodes else []
+        names = []
+        for (pid, _), n in self.nodes.items():
+            if self.piece_lane.get(pid) == p.id and isinstance(n["region"], int):
+                if self.regions[n["region"]].name not in names:
+                    names.append(self.regions[n["region"]].name)
+        return names
+
     def view(self) -> dict:
         return {
             "regions": [{"id": r.id, "kind": r.kind, "name": r.name, "field": r.field_id,
                          "poly": _poly_json(r.geom.simplify(0.1))} for r in self.regions],
             "passages": [{"id": p.id, "name": p.name, "kind": p.kind, "usable": p.id not in self.unusable,
-                          "reason": self.unusable.get(p.id),
-                          "connects": [self.regions[self.nodes[(p.id, k)]["region"]].name for k in (0, 1)]
-                          if (p.id, 0) in self.nodes else []} for p in self.world.passages],
-            "skipped_fields": self.skipped, "warnings": self.warnings,
+                          "reason": self.unusable.get(p.id) or self.lane_notes.get(p.id),
+                          "connects": self._connects(p)} for p in self.world.passages],
+            "strict": self.strict, "skipped_fields": self.skipped, "warnings": self.warnings,
         }
+
+
+def _points(geom) -> list:
+    """Losse punten uit een doorsnede (punt, punten, of de einden van een stuk dat samenvalt)."""
+    out = []
+    for g in getattr(geom, "geoms", [geom]):
+        if g.is_empty:
+            continue
+        if g.geom_type == "Point":
+            out.append((g.x, g.y))
+        elif g.geom_type == "LineString":
+            cs = list(g.coords)
+            out += [(cs[0][0], cs[0][1]), (cs[-1][0], cs[-1][1])]
+        else:
+            out += _points(g)
+    return out
 
 
 def _approach(region: Region, pts: list, goal_pose, radius: float, step: float) -> list:
@@ -469,12 +772,12 @@ def plan_farm(world, field_ids: list[str] | None = None, settings: PlanSettings 
         wb, tw, ang = (1.2, 1.0, 30.0) if vehicle is None else (vehicle.wheelbase_m, vehicle.track_width_m,
                                                                vehicle.max_wheel_angle_deg)
         R = robot_turn_radius(wb, tw, ang) * s.turn_margin
-    graph = FarmGraph(world, s)
-    half = graph.half
-    warnings = list(graph.warnings)
     if start_xy is None:
         sx, sy, _ = world.start_xy_heading()
         start_xy = (sx, sy)
+    graph = FarmGraph(world, s, turn_radius_m=R, start_xy=start_xy)
+    half = graph.half
+    warnings = list(graph.warnings)
     names = {f.id: f.name for f in world.fields}
     wanted = list(field_ids) if field_ids else [f.id for f in world.fields]
     unreachable = []
@@ -487,12 +790,18 @@ def plan_farm(world, field_ids: list[str] | None = None, settings: PlanSettings 
         else:
             todo.append(fid)
 
-    here = graph.locate(start_xy)
+    here = graph.start if graph.strict else graph.locate(start_xy)
+    if here is None and graph.strict:
+        raise ValueError(graph.start_error or "de startplek ligt niet in een veld of op een rijpad")
     if here is None:
         raise ValueError("de startplek ligt niet in of bij een veld of rijgebied (erf, pad, rijzone): zet de "
                          "startplek op het erf of teken daar een rijzone")
     home = here
-    if math.hypot(here[1][0] - start_xy[0], here[1][1] - start_xy[1]) > 0.5:
+    if isinstance(here[0], str):
+        off = math.hypot(here[1][0] - start_xy[0], here[1][1] - start_xy[1])
+        warnings.append("de robot staat op een rijpad en pakt de lijn daar op" if off < 0.3 else
+                        f"de robot staat in de zone van een rijpad en pakt de lijn op, {off:.1f} m naast hem")
+    elif math.hypot(here[1][0] - start_xy[0], here[1][1] - start_xy[1]) > 0.5:
         warnings.append(f"startplek ligt {math.hypot(here[1][0] - start_xy[0], here[1][1] - start_xy[1]):.1f} m "
                         f"buiten {graph.regions[here[0]].name}; de route begint op de rand daarvan")
     segments: list[Segment] = []
@@ -506,8 +815,9 @@ def plan_farm(world, field_ids: list[str] | None = None, settings: PlanSettings 
             kind, ref, pts = hops[-1]
             segs[-1].pts = _approach(graph.regions[ref], pts, goal_pose, R, s.point_step_m)
         for sg in segs:
-            if sg.type == "doorgang" and sg.meta["doorgang"] not in used_passages:
-                used_passages.append(sg.meta["doorgang"])
+            for pid in (sg.meta.get("rijpaden") or [sg.meta["doorgang"]]) if sg.type == "doorgang" else []:
+                if pid not in used_passages:
+                    used_passages.append(pid)
         segments.extend(sg for sg in segs if len(sg.pts) >= 2)
 
     while todo:
@@ -521,7 +831,7 @@ def plan_farm(world, field_ids: list[str] | None = None, settings: PlanSettings 
             if order == "gegeven":
                 fid = todo.pop(0)
                 unreachable.append({"field": fid, "name": names[fid],
-                                    "reason": "geen route via doorgangen vanaf de vorige plek"})
+                                    "reason": "geen route via rijpaden en doorgangen vanaf de vorige plek"})
                 continue
             break
         d, fid, key = min(cands, key=lambda t: t[0])
@@ -559,7 +869,8 @@ def plan_farm(world, field_ids: list[str] | None = None, settings: PlanSettings 
         here = (ri, graph.regions[ri].snap((last[0], last[1])))
     for fid in todo:
         unreachable.append({"field": fid, "name": names[fid],
-                            "reason": "geen doorgang: teken een doorgang (dam, hek) naar dit veld"})
+                            "reason": ("geen rijpad of doorgang: teken een rijpad tot in dit veld" if graph.strict
+                                       else "geen doorgang: teken een doorgang (dam, hek) naar dit veld")})
     if return_home and fields_out:
         dist, prev = graph.dijkstra(*here)
         hops = graph.hops(here[0], here[1], home[0], home[1], dist, prev)
@@ -657,7 +968,8 @@ def to_veldmissie_farm(plan: dict, world) -> dict:
                 seg[k] = sg.meta[k]
         segs.append(seg)
     s = plan["settings"]
-    corridors = [passage_corridor(g.passages[pid]) for pid in plan["passages_used"]]
+    used = [g.lanes.get(pid) or g.passages[pid] for pid in plan["passages_used"]]
+    corridors = [lane_corridor(p) if is_lane(p) else passage_corridor(p) for p in used]
     regions = [r.geom.buffer(plan["half_width_m"], join_style="mitre") for r in g.regions
                if r.kind == "rijgebied" and any(sg.meta.get("gebied") == r.name for sg in plan["segments"])]
     allowed = [a for a in (*plan["allowed"], *regions, *corridors) if a is not None and not a.is_empty]
@@ -668,9 +980,10 @@ def to_veldmissie_farm(plan: dict, world) -> dict:
                     "bewerkt_m2": fl["worked_m2"]} for fl in plan["fields"]],
         "volgorde": plan["order"],
         "doorgangen": [{"id": p.id, "naam": p.name, "soort": p.kind, "breedte_m": p.width_m,
+                        **({"bochtbreedte_m": p.bend_width_m} if p.bend_width_m else {}),
                         "richting": p.direction, "max_snelheid_kmh": p.max_speed_kmh, "bevestigen": p.confirm,
                         "lijn": [ll(q) for q in p.xy]}
-                       for p in (g.passages[pid] for pid in plan["passages_used"])],
+                       for p in used],
         "robot": {"draaicirkel_m": plan["turn_radius_m"], "regelpunt": "midden achteras",
                   "halve_breedte_m": plan["half_width_m"]},
         "werkbreedte_m": s["work_width_m"], "overlap_m": s["overlap_m"],

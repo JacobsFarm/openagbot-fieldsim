@@ -1,36 +1,43 @@
 <script>
   // Boerderijmissie: meer velden achter elkaar. De planner kiest de volgorde, plant elk veld en rijdt tussen de
   // velden alleen via de doorgangen (dam, hek, oversteek) die in "Wereld bewerken" getekend zijn.
-  import { post } from '../lib/api.js';
+  import { get, post } from '../lib/api.js';
 
   let { scene, onPlan, onStarted } = $props();
 
   let picked = $state({});               // veld-id -> meedoen (leeg = alle velden)
   let width = $state(3.0);
+  let transportWidth = $state(Number(localStorage.getItem('fieldsim.transportWidth')) || 1.2);   // machine onderweg
   let rounds = $state(2);
   let speed = $state(3.0);
   let transport = $state(3.0);
   let date = $state(new Date().toISOString().slice(0, 10));
   let dikeMode = $state('');
   let returnHome = $state(true);
+  let startFrom = $state('startplek');   // startplek | robot | vloot:<id>
+  let fleet = $state.raw([]);            // echte robots, om vanaf hun plek te plannen
+  get('/api/fleet').then((d) => (fleet = d.robots.filter((r) => r.enabled))).catch(() => {});
   let pattern = $state('auto');
   let straight = $state(true);
   let busy = $state(false);
   let msg = $state('');
   let plan = $state.raw(null);
 
+  const lanes = $derived((plan?.graph?.passages ?? []).filter((p) => p.kind === 'rijpad'));
   const chosen = $derived(Object.entries(picked).filter(([, v]) => v).map(([k]) => k));
   const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)} u ${Math.round(m % 60)} min` : `${Math.round(m)} min`);
 
   function settings() {
-    return { work_width_m: width, headland_rounds: rounds, speed_kmh: speed, transport_speed_kmh: transport, date,
+    try { localStorage.setItem('fieldsim.transportWidth', String(transportWidth)); } catch {}
+    return { work_width_m: width, transport_width_m: transportWidth, headland_rounds: rounds, speed_kmh: speed, transport_speed_kmh: transport, date,
       dike_mode: dikeMode || null, order: pattern, headland_straight: straight };
   }
 
   async function doPlan() {
     busy = true; msg = 'plannen (elk veld en de routes ertussen)...';
     try {
-      plan = await post('/api/farm/plan', { fields: chosen.length ? chosen : null, settings: settings(), return_home: returnHome });
+      plan = await post('/api/farm/plan', { fields: chosen.length ? chosen : null, settings: settings(), return_home: returnHome,
+        start: startFrom });
       onPlan?.(plan);
       msg = '';
     } catch (err) { msg = clean(err); plan = null; }
@@ -83,6 +90,7 @@
 </div>
 <div class="grid">
   <label>werkbreedte (m)<input type="number" min="0.5" max="12" step="0.25" bind:value={width} /></label>
+  <label title="Breedte van de machine onderweg: rijpaden en doorgangen moeten hier breder dan zijn. Los van de werkbreedte (camera, boom).">transportbreedte (m)<input type="number" min="0.5" max="12" step="0.1" bind:value={transportWidth} /></label>
   <label>rondjes kopakker<input type="number" min="0" max="8" step="1" bind:value={rounds} /></label>
   <label>werksnelheid (km/h)<input type="number" min="1.4" max="5.6" step="0.1" bind:value={speed} /></label>
   <label>transport (km/h)<input type="number" min="1.4" max="5.6" step="0.1" bind:value={transport} /></label>
@@ -103,7 +111,14 @@
   </label>
   <label class="chk" style="align-self:end"><input type="checkbox" bind:checked={straight} />rondje 2+ recht</label>
 </div>
-<label class="chk" style="margin-top:6px"><input type="checkbox" bind:checked={returnHome} />na afloop terug naar de startplek</label>
+<label style="margin-top:6px">route begint
+  <select bind:value={startFrom}>
+    <option value="startplek">op de startplek van de wereld</option>
+    <option value="robot">waar de sim-robot nu staat</option>
+    {#each fleet as r}<option value="vloot:{r.id}">waar {r.name} nu staat (echte robot)</option>{/each}
+  </select>
+</label>
+<label class="chk" style="margin-top:6px"><input type="checkbox" bind:checked={returnHome} />na afloop terug naar het beginpunt</label>
 
 <div class="row" style="margin-top:8px">
   <button onclick={doPlan} disabled={busy}>Plan</button>
@@ -119,6 +134,13 @@
     <span><b>{fmtMin(st.time_min)}</b> · {(st.length_m / 1000).toFixed(1)} km, waarvan {(st.transport_m / 1000).toFixed(2)} km transport</span>
     <span>{st.passages} doorgangen · {st.efficiency_pct}% van de route werkend</span>
   </div>
+  {#if lanes.length}
+    <div class="sub">Rijpaden <span class="muted">· buiten de velden rijdt hij alleen over deze lijnen, binnen hun zone</span></div>
+    {#each lanes as l}
+      <div class="small" class:bad={!l.usable || l.reason}>{l.name || l.id}{#if l.connects.length}
+        <span class="muted"> · {l.connects.join(', ')}</span>{/if}{#if l.reason}: {l.reason}{/if}</div>
+    {/each}
+  {/if}
   <div class="sub">Volgorde</div>
   <ol class="order small">
     {#each plan.fields as f}<li>{f.name} <span class="muted">{f.rounds} rondjes · {fmtMin(f.time_min)} · {f.coverage_allowed_pct}%</span></li>{/each}

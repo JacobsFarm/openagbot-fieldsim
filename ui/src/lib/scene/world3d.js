@@ -1,8 +1,10 @@
 // De 3D-wereld: terrein, velden, water, gebouwen, robot, missie en spoor. Z-as omhoog, zoals ENU in de sim.
 import * as THREE from 'three';
+import { bendPieces } from '../lanebends.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { color, fovDeg } from '../../theme.js';
 import { building, fences, trees } from './buildings.js';
+import { FleetLayer } from './fleet.js';
 import { groundMat, ORDER, setEdges, solid, viewHeight, waterMat } from './materials.js';
 import { ImplementModel } from './implement.js';
 import { RobotModel } from './robot.js';
@@ -58,6 +60,8 @@ export class World3D {
     this.stripGroup = new THREE.Group();        // bewerkte strook van het werktuig
     this.scene.add(this.stripGroup);
     this.implement = null;
+    this.fleet = new FleetLayer(this.scene);    // echte robots die de sim live volgt
+    this.followId = null;                       // id van de vlootrobot die de camera volgt (null = de sim-robot)
     this.robot = null;
     this.robotPose = null;
     this.trailPts = [];
@@ -75,6 +79,8 @@ export class World3D {
       this._raf = requestAnimationFrame(loop);
       if (this.suspended) return;               // de 2D-plattegrond staat ervoor: niet tekenen
       const t = this._clock.getElapsedTime();
+      this.fleet.update(Math.min(0.25, t - (this._lastT ?? t)));
+      this._lastT = t;
       this._updateCamera(t);
       this.controls.update();
       this._updateLabels();
@@ -211,6 +217,7 @@ export class World3D {
       this.robot = new RobotModel(scene.robot);
       this.scene.add(this.robot.group);
     }
+    this.fleet.setWorld(hf, scene.robot);
     const s = scene.start;
     this.setRobot({ x: s.x, y: s.y, z: hf.at(s.x, s.y), heading: s.heading, pitch: 0, roll: 0,
       wheel_left_deg: 0, wheel_right_deg: 0 });
@@ -259,6 +266,18 @@ export class World3D {
     }
     for (const p of scene.passages ?? []) {
       const band = bufferLine(p.line, p.width / 2);
+      if (p.kind === 'rijpad') {             // vaste rijlijn: de zone als vlak, de lijn zelf gestreept erin
+        const c = [0.25, 0.90, 0.85];
+        add(area(band, c, 0.16));
+        add(ribbon(band, hf, c, { closed: true, width: 0.12, px: 1.4, offset: 0.12, order: ORDER.overlay + 2 }));
+        add(ribbon(p.line, hf, c, { width: 0.16, px: 1.8, offset: 0.13, dash: 1.2, order: ORDER.overlay + 3 }));
+        for (const piece of bendPieces(p.line, p.width, p.bend_width)) {     // bredere zone in de bochten
+          const wide = bufferLine(piece, p.bend_width / 2);
+          add(area(wide, c, 0.12));
+          add(ribbon(wide, hf, c, { closed: true, width: 0.12, px: 1.4, offset: 0.12, order: ORDER.overlay + 2 }));
+        }
+        continue;
+      }
       add(area(band, [0.72, 0.89, 0.29], 0.22));
       add(ribbon(band, hf, [0.72, 0.89, 0.29], { closed: true, width: 0.18, px: 1.8, offset: 0.12, order: ORDER.overlay + 2 }));
       for (const q of [band[0], band[band.length - 1], band[band.length / 2 - 1], band[band.length / 2]]) {
@@ -343,6 +362,21 @@ export class World3D {
     if (this.robot) this.robot.setPose(r);
   }
 
+  // Vloot: echte robots uit /ws. `setFollow(id)` laat de camera die robot volgen in plaats van de sim-robot.
+  setFleet(robots) { this.fleet.set(robots ?? []); }
+
+  setFollow(id) {
+    if (id === this.followId) return;
+    this.followId = id;
+    this._snap = true;
+    if (this.mode !== 'volg') this.setMode(this.mode);
+  }
+
+  // Waar de camera naar kijkt: de gevolgde vlootrobot als die in deze wereld staat, anders de sim-robot
+  _camPose() {
+    return (this.followId && this.fleet.pose(this.followId)) || this.robotPose;
+  }
+
   // ------------------------------------------------------------------ aanbouwdeel
   setImplement(spec) {
     if (this.implement?.spec.id === spec?.id) return;
@@ -422,7 +456,7 @@ export class World3D {
   setMode(mode) {
     if (mode === 'volg' && this.mode !== 'volg') this._snap = true;
     this.mode = mode;
-    const r = this.robotPose;
+    const r = this._camPose();
     if (!r) return;
     if (mode === 'boven') {
       this.controls.target.set(r.x, r.y, r.z);
@@ -442,7 +476,7 @@ export class World3D {
   }
 
   _updateCamera(t) {
-    const r = this.robotPose;
+    const r = this._camPose();
     if (!r) return;
     if (this.mode === 'rond' && this._orbit) {
       const o = this._orbit, a = 0.6 + (t - o.t0) * 0.035;

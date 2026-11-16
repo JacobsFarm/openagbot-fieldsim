@@ -15,6 +15,8 @@ Gevaren (`hazards`):
 Bij een doorgang (dam, duiker, brug, hek, oversteek) is het gevaar dat hij kruist over de breedte van de doorgang
 weggehaald: dat is de enige plek waar de robot een sloot, dijk, hek of weg over mag.
 
+Een rijpad (doorgang van de soort `rijpad`, missions/lanes.py) is een vaste rijlijn en haalt GEEN gevaar weg.
+
 Dezelfde gevaren gaan als `geofence` mee in veldmissie.json (`geofence_export`), zodat de echte robot dezelfde
 grenzen kan bewaken (zie docs/veldmissie.md in OpenAgbot).
 
@@ -125,11 +127,13 @@ def hazards(world, date=None, mission_dike_mode: str | None = None) -> list[Haza
             if not h.passable and len(h.xy) >= 3:
                 out.append(Hazard("gat", AVOID, poly(h.xy), f"{f.id}_gat{i}", h.name or f"gat in {f.name}"))
 
-    corridors = [passage_corridor(p) for p in world.passages if len(p.xy) >= 2]
+    # Een rijpad is een vaste rijlijn, geen oversteek: het haalt geen gevaar weg (daar blijft een dam of hek voor nodig)
+    crossings = [p for p in world.passages if len(p.xy) >= 2 and p.kind != "rijpad"]
+    corridors = [passage_corridor(p) for p in crossings]
     if corridors:
         cut = unary_union(corridors)
         # door de slootzone heen loopt de doorgang verder dan de getekende lijn: de aanloop naar het veld
-        cut_water = unary_union([passage_corridor(p, extend_m=zone + 3.0) for p in world.passages if len(p.xy) >= 2])
+        cut_water = unary_union([passage_corridor(p, extend_m=zone + 3.0) for p in crossings])
         kept = []
         for h in out:
             c = cut_water if h.kind == "water" else cut

@@ -50,6 +50,9 @@ class PlanSettings:
     turn_radius_m: float | None = None      # None = uit de robot (wielbasis, stuurhoek) x turn_margin
     turn_margin: float = 1.15
     robot_half_width_m: float = 0.6         # buitenkant wielen vanaf het midden
+    # Breedte van de machine onderweg (rijpaden, doorgangen, transport door een veld). Los van de werkbreedte: een
+    # camera of spuitboom die 3 m bestrijkt maakt de robot niet 3 m breed. None = de robot zelf (2 x robot_half_width_m).
+    transport_width_m: float | None = None
     clearance: dict = field(default_factory=dict)   # vrije ruimte per soort; leeg = boerderij-instelling/standaard
     date: str | None = None                 # datum van de missie (jjjj-mm-dd) voor nesten in hun periode; None = vandaag
     dike_mode: str | None = None            # dijken: None = per dijk, of ontwijken | negeren | doorgang

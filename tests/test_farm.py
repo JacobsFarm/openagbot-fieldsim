@@ -286,11 +286,11 @@ def test_field_without_passage_is_reported_not_driven():
 
 def test_narrow_or_one_way_passage():
     w = make_world()
-    next(p for p in w.passages if p.id == "dam").width_m = 2.0        # smaller dan het werktuig van 3 m
-    g = FarmGraph(w, PlanSettings(work_width_m=3.0))
+    next(p for p in w.passages if p.id == "dam").width_m = 2.0        # smaller dan de machine van 3 m
+    g = FarmGraph(w, PlanSettings(transport_width_m=3.0))
     assert "te smal" in g.unusable["dam"]
-    assert plan_farm(w, None, {"headland_rounds": 1})["order"] == ["west"]
-    assert plan_farm(w, None, {"headland_rounds": 1, "work_width_m": 1.5})["order"] == ["west", "oost"]
+    assert plan_farm(w, None, {"headland_rounds": 1, "transport_width_m": 3.0})["order"] == ["west"]
+    assert plan_farm(w, None, {"headland_rounds": 1, "transport_width_m": 1.5})["order"] == ["west", "oost"]
     w = make_world()
     next(p for p in w.passages if p.id == "dam").direction = "terug"   # alleen van oost naar west
     p = plan_farm(w, None, {"headland_rounds": 1})

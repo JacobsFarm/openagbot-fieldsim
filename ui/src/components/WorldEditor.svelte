@@ -2,7 +2,8 @@
   // Wereld bewerken: bovenaanzicht van de gekozen wereld, noorden boven, alles in lokale meters.
   // Wat je tekent of wijzigt komt in farm.json (eigen aanpassingen); de kaartdata in world.json blijft de bron,
   // zodat "Bouw" opnieuw kan draaien zonder dat je werk verdwijnt.
-  import { onMount } from 'svelte';
+  import { bendPieces } from '../lib/lanebends.js';
+import { onMount } from 'svelte';
   import { loadAerialTiles } from '../lib/aerial.js';
   import { get, post, put } from '../lib/api.js';
   import { approxLatLon, bounds, dist, fmtArea, fmtLen, hitTest, lineLength, nearestOnSegment, newId, ORDER, polyArea,
@@ -418,8 +419,14 @@
       if (w * view.s > 3) {                        // echte breedte als band
         ctx.beginPath(); path(ctx, o.pts, false);
         ctx.lineCap = 'butt';
-        ctx.strokeStyle = o.layer === 'passages' ? 'rgba(185,227,74,0.35)' : o.layer === 'dikes' ? 'rgba(201,163,106,0.45)' : css(color.water, 0.75);
+        ctx.strokeStyle = o.layer === 'passages' ? (o.props.kind === 'rijpad' ? 'rgba(64,230,217,0.3)' : 'rgba(185,227,74,0.35)') : o.layer === 'dikes' ? 'rgba(201,163,106,0.45)' : css(color.water, 0.75);
         ctx.lineWidth = w * view.s; ctx.setLineDash([]); ctx.stroke();
+        if (o.layer === 'passages' && o.props.kind === 'rijpad') {
+          for (const piece of bendPieces(o.pts, w, o.props.bend_width_m)) {     // bredere zone in de bochten
+            ctx.beginPath(); path(ctx, piece, false); ctx.lineCap = 'round';
+            ctx.lineWidth = o.props.bend_width_m * view.s; ctx.stroke(); ctx.lineCap = 'butt';
+          }
+        }
         ctx.setLineDash(s.dash ?? []);
       }
       ctx.beginPath(); path(ctx, o.pts, false);
@@ -889,6 +896,13 @@
             <div class="row"><button onclick={() => commit(replaceObj(one, touch(one, { pts: [...one.pts].reverse() })))}>Richting omdraaien</button></div>
             <div class="tiny muted">Teken de rijlijn van binnen het ene veld (of het erf) tot binnen het andere. De robot gaat
               alleen hier over een sloot, dijk, hek of weg.</div>
+            {#if one.props.kind === 'rijpad'}
+              <div class="tiny muted"><b>Rijpad</b> = vaste rijlijn met een zone (de breedte) eromheen. Zodra er rijpaden zijn
+                rijdt de robot buiten de velden alleen nog over deze lijnen en stopt hij als hij uit de zone komt. Teken de
+                lijn tot IN het veld; laat rijpaden elkaar raken of kruisen om ze te verbinden. Voor de draaicirkel heeft
+                een bocht meer ruimte nodig: vul <b>breedte in de bocht</b> in, dan is de zone alleen rond elke knik en aan
+                de einden zo breed en blijft het pad verder smal. Een rijpad haalt geen sloot weg: over een dam teken je ook de dam.</div>
+            {/if}
           {/if}
           {#if one.layer === 'zones'}
             <div class="tiny muted">niet bewerken = dit stuk van het veld slaat de missie over (een punt, een uitstulping); de

@@ -2,9 +2,10 @@
   // Plattegrond: schermvullend, vlak 2D-bovenaanzicht met alleen lijnen. Perceelgrenzen, veldnamen, missie, spoor
   // en robot; geen texturen, schaduw of luchtfoto. Slepen = schuiven, wiel = zoomen, klik = veld kiezen,
   // dubbelklik = hetzelfde als in 3D (veld openen, robot neerzetten of punt zetten). Noorden boven.
-  import { onMount } from 'svelte';
+  import { bendPieces } from '../lib/lanebends.js';
+import { onMount } from 'svelte';
 
-  let { scene = null, robot = null, mission = null, trail = [], doneSwaths = [], current = null, selected = null,
+  let { scene = null, robot = null, others = [], center = null, mission = null, trail = [], doneSwaths = [], current = null, selected = null,
     path = null, points = [], starts = [], activeStart = null, layers = {}, follow = $bindable(false), onPick = null, onSelect = null,
     onInfo = null } = $props();
   let box, canvas;
@@ -51,6 +52,7 @@
     schedule();
   }
   export function fitAll() { fit(scene?.area?.length ? scene.area : scene?.fields.flatMap((f) => f.poly)); }
+  export function centerOn(x, y) { cx = x; cy = y; s = Math.max(s, 6); follow = false; schedule(); }
   export function fitField(id) { fit(scene?.fields.find((f) => f.id === id)?.poly); }
 
   function line(ctx, pts, close = false) {
@@ -83,7 +85,8 @@
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
     if (!scene) return;
-    if (follow && robot && !drag) { cx = robot.x; cy = robot.y; }
+    const target = center ?? robot;        // 'volg': de robot uit de vloot die je volgt, anders de sim-robot
+    if (follow && target && !drag) { cx = target.x; cy = target.y; }
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
     // Raster op een rond aantal meters (zelfde stap als de schaalbalk)
@@ -110,7 +113,18 @@
       ctx.setLineDash([4, 4]);
       for (const z of scene.zones ?? []) if (z.klass === 'niet_bewerken') { line(ctx, z.poly, true); ctx.strokeStyle = '#b58cff'; ctx.stroke(); }
       ctx.setLineDash([]);
-      for (const p of scene.passages ?? []) { line(ctx, p.line); ctx.strokeStyle = 'rgba(185,227,74,0.5)'; ctx.lineWidth = Math.max(2, p.width * s); ctx.stroke(); }
+      for (const p of scene.passages ?? []) {                   // rijpad: zone + de vaste rijlijn erin
+        const lane = p.kind === 'rijpad';
+        line(ctx, p.line); ctx.strokeStyle = lane ? 'rgba(64,230,217,0.28)' : 'rgba(185,227,74,0.5)';
+        ctx.lineWidth = Math.max(2, p.width * s); ctx.stroke();
+        if (lane) {
+          for (const piece of bendPieces(p.line, p.width, p.bend_width)) {      // bredere zone in de bochten
+            line(ctx, piece); ctx.lineCap = 'round'; ctx.lineWidth = Math.max(2, p.bend_width * s); ctx.stroke(); ctx.lineCap = 'butt';
+          }
+          line(ctx, p.line);
+          ctx.strokeStyle = 'rgba(64,230,217,0.95)'; ctx.lineWidth = 1.4; ctx.setLineDash([8, 5]); ctx.stroke(); ctx.setLineDash([]);
+        }
+      }
     }
 
     // Percelen: dunne grens, het gekozen veld in de accentkleur
@@ -194,6 +208,15 @@
       ctx.globalAlpha = 1;
     }
 
+    for (const o of others) {                // echte robots van de vloot: pijl in hun kleur, naam erbij
+      ctx.save(); ctx.translate(tx(o.x), ty(o.y)); ctx.rotate((o.heading * Math.PI) / 180);
+      ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(7, 7); ctx.lineTo(0, 3.5); ctx.lineTo(-7, 7); ctx.closePath();
+      ctx.fillStyle = o.color; ctx.fill(); ctx.strokeStyle = C.bg; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.restore();
+      ctx.font = '600 11px "Barlow", "Segoe UI", Arial'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3; ctx.strokeStyle = C.bg; ctx.strokeText(o.name, tx(o.x) + 12, ty(o.y));
+      ctx.fillStyle = o.color; ctx.fillText(o.name, tx(o.x) + 12, ty(o.y));
+    }
     if (robot) {
       ctx.save(); ctx.translate(tx(robot.x), ty(robot.y)); ctx.rotate((robot.heading * Math.PI) / 180);
       ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(7, 7); ctx.lineTo(0, 3.5); ctx.lineTo(-7, 7); ctx.closePath();
@@ -267,7 +290,7 @@
     if (scene && fitted !== scene && w > 1) { fitted = scene; hover = null; fitAll(); info(); }
   });
   $effect(() => {
-    scene; robot; mission; trail.length; doneSwaths.length; current; selected; path; points; starts; activeStart; follow;
+    scene; robot; others; center; mission; trail.length; doneSwaths.length; current; selected; path; points; starts; activeStart; follow;
     layers.boundaries; layers.labels; layers.farm;
     schedule();
   });

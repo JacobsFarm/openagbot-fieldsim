@@ -1,10 +1,11 @@
 <script>
   // Minikaart: bovenaanzicht in de kleuren van de 3D-wereld, banen genummerd, robot als pijl.
   // Met een missie zoomt hij in op dat veld; anders de hele wereld. Noorden boven.
-  import { onMount } from 'svelte';
+  import { bendPieces } from '../lib/lanebends.js';
+import { onMount } from 'svelte';
   import { color, css } from '../theme.js';
 
-  let { scene = null, robot = null, mission = null, trail = [], doneSwaths = [], current = null, starts = [], width = 300,
+  let { scene = null, robot = null, others = [], mission = null, trail = [], doneSwaths = [], current = null, starts = [], width = 300,
     height = 186 } = $props();
   let canvas;
   let scale = $state(0);                 // beeldpunten per meter (voor de schaalbalk)
@@ -66,7 +67,19 @@
     for (const p of scene.passages ?? []) {
       ctx.beginPath();
       p.line.forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
-      ctx.strokeStyle = '#b9e34a'; ctx.lineWidth = Math.max(2, p.width * v.s); ctx.globalAlpha = 0.7; ctx.stroke(); ctx.globalAlpha = 1;
+      // rijpad (vaste rijlijn): de zone in blauwgroen met de lijn erin; een doorgang in het groen
+      const lane = p.kind === 'rijpad';
+      ctx.strokeStyle = lane ? '#40e6d9' : '#b9e34a'; ctx.lineWidth = Math.max(2, p.width * v.s);
+      ctx.globalAlpha = lane ? 0.35 : 0.7; ctx.stroke(); ctx.globalAlpha = 1;
+      if (lane) {
+        ctx.lineWidth = 1; ctx.stroke();
+        for (const piece of bendPieces(p.line, p.width, p.bend_width)) {        // bredere zone in de bochten
+          ctx.beginPath();
+          piece.forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
+          ctx.lineCap = 'round'; ctx.lineWidth = Math.max(2, p.bend_width * v.s); ctx.globalAlpha = 0.35; ctx.stroke();
+          ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+        }
+      }
     }
     if (mission?.kind === 'veldmissie') {
       const segCol = { rondje: '#4d9eff', baan: 'rgba(255,255,255,0.75)', bocht: '#ff9f26', overgang: '#c873ff',
@@ -111,6 +124,12 @@
       trail.forEach(([x, y], i) => (i ? ctx.lineTo(v.tx(x), v.ty(y)) : ctx.moveTo(v.tx(x), v.ty(y))));
       ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.1; ctx.stroke();
     }
+    for (const o of others) {                // echte robots van de vloot, in hun eigen kleur
+      ctx.save(); ctx.translate(v.tx(o.x), v.ty(o.y)); ctx.rotate((o.heading * Math.PI) / 180);
+      ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6, 6); ctx.lineTo(0, 3); ctx.lineTo(-6, 6); ctx.closePath();
+      ctx.fillStyle = o.color; ctx.fill(); ctx.strokeStyle = '#10180a'; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.restore();
+    }
     if (robot) {
       const x = v.tx(robot.x), y = v.ty(robot.y), h = (robot.heading * Math.PI) / 180;
       ctx.save(); ctx.translate(x, y); ctx.rotate(h);
@@ -129,7 +148,7 @@
   });
 
   onMount(draw);
-  $effect(() => { scene; robot; mission; starts; trail.length; doneSwaths.length; current; draw(); });
+  $effect(() => { scene; robot; others; mission; starts; trail.length; doneSwaths.length; current; draw(); });
 </script>
 
 <div class="map" style="width:{width}px;height:{height}px">

@@ -46,9 +46,11 @@ SCHEMA = {
     "zones": {"label": "Rijzone", "plural": "Rijzones", "geom": "polygon", "edit": True, "props": [
         ["name", "naam", "text", "", None],
         ["klass", "klasse", "select", "alleen_rijden", list(ZONE_CLASSES)]]},
-    "passages": {"label": "Doorgang", "plural": "Doorgangen", "geom": "line", "edit": True, "props": [
+    # soort `rijpad` = vaste rijlijn met een zone (breedte) eromheen, over het erf en van veld naar veld
+    "passages": {"label": "Doorgang of rijpad", "plural": "Doorgangen en rijpaden", "geom": "line", "edit": True, "props": [
         ["name", "naam", "text", "", None], ["kind", "soort", "select", "dam", list(PASSAGE_KINDS)],
         ["width_m", "breedte (m)", "number", 4.0, None],
+        ["bend_width_m", "breedte in de bocht (m, alleen rijpad)", "number", None, None],
         ["direction", "richting", "select", "beide", ["beide", "heen", "terug"]],
         ["max_speed_kmh", "max. snelheid (km/h)", "number", 2.0, None],
         ["confirm", "eerst stoppen en wachten op vrijgave", "bool", False, None]]},

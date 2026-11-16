@@ -36,6 +36,9 @@ class FarmPlanBody(BaseModel):
     settings: dict = {}
     return_home: bool = True
     order: str = "auto"
+    # Waar de route begint: "startplek" (van de wereld), "robot" (waar de sim-robot nu staat) of "vloot:<id>"
+    # (waar die echte robot nu staat). Met rijpaden moet dat in een veld of binnen de zone van een rijpad zijn.
+    start: str = "startplek"
 
 
 class FarmDriveBody(BaseModel):
@@ -89,17 +92,39 @@ def register(app: FastAPI, sim_app) -> None:
             raise HTTPException(404, "eerst plannen")
         return cache
 
+    def start_xy(start: str):
+        """Beginpunt van de route in lokale meters; None = de startplek van de wereld."""
+        if start == "robot":
+            if sim_app.sim is None:
+                raise ValueError("geen simulatie: de sim-robot heeft geen positie")
+            st = sim_app.sim.vehicle.s
+            return (st.x, st.y)
+        if start.startswith("vloot:"):
+            try:
+                tel = sim_app.fleet.get(start[6:]).telemetry
+            except KeyError as e:
+                raise ValueError(str(e.args[0]))
+            if tel is None or not tel.has_position:
+                raise ValueError("die robot heeft nog geen GPS-positie (offline of geen fix)")
+            return w_frame().to_xy(tel.lat, tel.lon)
+        return None
+
+    def w_frame():
+        return world().frame
+
     @app.post("/api/farm/plan")
     def plan(body: FarmPlanBody):
         w = world()
         try:
             s = PlanSettings.from_dict(body.settings)
             vehicle = sim_app.sim.params if sim_app.sim is not None else None
-            p = plan_farm(w, body.fields, s, vehicle, return_home=body.return_home, order=body.order)
+            p = plan_farm(w, body.fields, s, vehicle, start_xy=start_xy(body.start), return_home=body.return_home,
+                          order=body.order)
         except (KeyError, ValueError, TypeError) as e:
             raise HTTPException(400, str(e))
         view = farm_view(p)
-        cache.update(plan=p, view=view, world=w)
+        view["start"] = body.start
+        cache.update(plan=p, view=view, world=w, start=body.start)
         try:
             folder = os.path.join(w.folder, "missions")
             os.makedirs(folder, exist_ok=True)
@@ -138,7 +163,7 @@ def register(app: FastAPI, sim_app) -> None:
         s = c["plan"]["settings"]
         if sim_app.sim is not None:
             sim_app.sim.set_geofence(s.get("date"), s.get("dike_mode"))
-            if body.place_robot:
+            if body.place_robot and c.get("start") != "robot":      # gepland vanaf waar hij staat: laten staan
                 x0, y0, th = c["plan"]["segments"][0].pts[0]
                 sim_app.sim.reset_pose(x0, y0, (90.0 - math.degrees(th)) % 360.0)
                 sim_app.sim.vehicle.s.stuck = None
@@ -198,8 +223,9 @@ def register(app: FastAPI, sim_app) -> None:
         return {"status": "ok", "kaart": sent.get("kaart"), "at": time.strftime("%H:%M:%S")}
 
     @app.get("/api/farm/graph")
-    def graph(width: float = 3.0):
-        g = FarmGraph(world(), PlanSettings(work_width_m=width))
+    def graph(width: float | None = None):
+        """`width` = transportbreedte in m; leeg = de robot zelf."""
+        g = FarmGraph(world(), PlanSettings(transport_width_m=width))
         return g.view()
 
     @app.post("/api/farm/suggest_passages")

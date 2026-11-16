@@ -25,6 +25,19 @@ export async function put(path, body = {}) {
   return r.json();
 }
 
+export async function del(path) {
+  const r = await fetch(path, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// Foutmelding van de sim-API zonder het pad ervoor: "/api/x: 502 {"detail":"..."}" -> "..."
+export function errorText(e) {
+  const t = String(e?.message || e);
+  const m = t.match(/\{.*\}$/s);
+  try { return m ? JSON.parse(m[0]).detail ?? t : t; } catch { return t; }
+}
+
 export async function getTerrain(cell = 2) {
   const r = await fetch(`/api/world/terrain?cell=${cell}`);
   const header = JSON.parse(r.headers.get('X-Terrain'));
@@ -37,16 +50,20 @@ export function connectState(onState, onStatus) {
   let closed = false;
   const open = () => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
-    ws.onopen = () => onStatus?.(true);
-    ws.onmessage = (e) => onState(JSON.parse(e.data));
-    ws.onclose = () => {
+    const sock = ws = new WebSocket(`${proto}://${location.host}/ws`);
+    sock.onopen = () => onStatus?.(true);
+    sock.onmessage = (e) => { if (sock === ws) onState(JSON.parse(e.data)); };
+    sock.onclose = () => {
+      if (sock !== ws) return;                 // vervangen door restart(): geen melding, geen tweede verbinding
       onStatus?.(false);
       if (!closed) setTimeout(open, 1000);
     };
   };
   open();
-  return () => { closed = true; ws?.close(); };
+  const stop = () => { closed = true; ws?.close(); };
+  // Nieuwe verbinding: de server stuurt dan alle sporen opnieuw vanaf het begin (na het laden van een wereld)
+  stop.restart = () => { const old = ws; open(); old?.close(); };
+  return stop;
 }
 
 export async function agbot(url, path, body) {

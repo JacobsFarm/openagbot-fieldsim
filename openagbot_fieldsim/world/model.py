@@ -239,7 +239,8 @@ class Zone:
         return {"id": self.id, "name": self.name, "klass": self.klass, "polygon": _round_ll(self.polygon)}
 
 
-PASSAGE_KINDS = ("dam", "duiker", "brug", "hek", "oversteek", "oprit")
+# `rijpad` is geen oversteek maar een vaste rijlijn met een zone eromheen (missions/lanes.py)
+PASSAGE_KINDS = ("dam", "duiker", "brug", "hek", "oversteek", "oprit", "rijpad")
 
 
 @dataclass
@@ -259,11 +260,17 @@ class Passage:
     name: str = ""
     source: str = "bron"
     xy: list[Point] = field(default_factory=list, repr=False)
+    # Alleen rijpad: breedte van de zone in de bochten en aan de einden (None = overal `width_m`). Zo blijft het
+    # pad op de rechte stukken smal en is er in de bocht ruimte voor de draaicirkel (missions/lanes.py).
+    bend_width_m: float | None = None
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "kind": self.kind, "line": _round_ll(self.line),
-                "width_m": self.width_m, "direction": self.direction, "max_speed_kmh": self.max_speed_kmh,
-                "confirm": self.confirm}
+        d = {"id": self.id, "name": self.name, "kind": self.kind, "line": _round_ll(self.line),
+             "width_m": self.width_m, "direction": self.direction, "max_speed_kmh": self.max_speed_kmh,
+             "confirm": self.confirm}
+        if self.bend_width_m:
+            d["bend_width_m"] = self.bend_width_m
+        return d
 
 
 @dataclass
@@ -571,7 +578,8 @@ class World:
             passages=[Passage(ring(x["line"]), float(x.get("width_m", 4.0)), x.get("kind", "dam"),
                               x.get("direction", "beide"), float(x.get("max_speed_kmh", 2.0)),
                               bool(x.get("confirm", x.get("kind") == "oversteek")), x["id"], x.get("name", ""),
-                              src(x)) for x in d.get("passages", [])],
+                              src(x), bend_width_m=float(x["bend_width_m"]) if x.get("bend_width_m") else None)
+                      for x in d.get("passages", [])],
             nests=[Nest(x["lat"], x["lon"], float(x.get("radius_m", 5.0)), x.get("start", "03-15"),
                         x.get("end", "08-15"), x["id"], x.get("name", ""), src(x)) for x in d.get("nests", [])],
             markers=[Marker(x["lat"], x["lon"], x.get("kind", "marker"), float(x.get("radius_m", 0.5)),

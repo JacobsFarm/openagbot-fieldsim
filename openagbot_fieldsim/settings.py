@@ -32,6 +32,7 @@ class Settings:
     world: str = "example"
     start_agbot: bool = True
     worlds_root: str | None = None     # andere map met werelden (standaard <home>/worlds)
+    fleet_autostart: bool = True       # verbinden met de robots uit fleet.json (uit in tests)
 
     @property
     def worlds_dir(self) -> str:
@@ -64,7 +65,7 @@ def load_settings() -> Settings:
     default_agbot = bundled if os.path.isdir(os.path.join(bundled, "app")) else r"F:\Agbot\Bruut_OpenAgbot"
     s = Settings(home=home, agbot_dir=data.get("agbot_dir") or default_agbot)
     for key in ("ui_port", "agbot_port", "gnss_port", "steering_port", "can_port", "world", "start_agbot",
-                "worlds_root"):
+                "worlds_root", "fleet_autostart"):
         if key in data:
             setattr(s, key, data[key])
     if os.environ.get("FIELDSIM_AGBOT_DIR"):
