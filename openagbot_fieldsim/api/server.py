@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from openagbot_fieldsim.api import editor_api, farm_api, field_api, fleet_api, implements_api, points_api
+from openagbot_fieldsim.api import editor_api, farm_api, field_api, fleet_api, implements_api, points_api, queue_api
 from openagbot_fieldsim.api.scene import scene, terrain_bytes
 from openagbot_fieldsim.app import SimApp
 from openagbot_fieldsim.missions.ab import plan_ab, save_ab_line, start_command
@@ -318,6 +318,7 @@ def create_app(sim_app: SimApp) -> FastAPI:
     editor_api.register(app, sim_app)
     implements_api.register(app, sim_app)
     fleet_api.register(app, sim_app)
+    queue_api.register(app, sim_app)
 
     @app.websocket("/ws")
     async def ws_state(ws: WebSocket):

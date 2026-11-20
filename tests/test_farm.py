@@ -718,3 +718,21 @@ def test_mission_can_begin_with_outer_round_or_first_straight_swath():
     assert first["eerst"].type == "rondje" and first["laatst"].type == "baan"
     x, y = first["laatst"].pts[0][:2]
     assert math.hypot(x - start[0], y - start[1]) < 20.0   # de rechte baan in de hoek bij het startpunt
+
+
+def test_queues_save_list_use_delete(client):
+    c, app = client
+    assert c.get("/api/queues").json() == {"queues": []}
+    body = {"name": "Voorjaar", "fields": ["oost", "west"], "settings": {"work_width_m": 2.5}, "optimize": False}
+    r = c.post("/api/queues", json=body).json()
+    qid = r["saved"]
+    q = r["queues"][0]
+    assert q["fields"] == ["oost", "west"] and q["missing"] == [] and q["settings"]["work_width_m"] == 2.5
+    # zelfde naam = bijwerken, geen tweede
+    r = c.post("/api/queues", json={**body, "name": "voorjaar", "fields": ["west", "weg"]}).json()
+    assert len(r["queues"]) == 1 and r["saved"] == qid and r["queues"][0]["missing"] == ["weg"]
+    assert c.post(f"/api/queues/{qid}/used").json()["queues"][0]["last_used"]
+    assert c.post("/api/queues", json={**body, "fields": []}).status_code == 400
+    assert os.path.exists(os.path.join(app.world.folder, "missions", "wachtrijen.json"))
+    assert c.delete(f"/api/queues/{qid}").json() == {"queues": []}
+    assert c.delete(f"/api/queues/{qid}").status_code == 404

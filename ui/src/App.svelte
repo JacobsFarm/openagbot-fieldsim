@@ -34,6 +34,8 @@
   let paused = $state(false);            // pauzemenu open
   let settings = $state(loadSettings());
   let tab = $state('');
+  let drawerMax = $state((() => { try { return localStorage.getItem('fieldsim.drawerMax') === '1'; } catch { return false; } })());
+  $effect(() => { try { localStorage.setItem('fieldsim.drawerMax', drawerMax ? '1' : '0'); } catch { /* privé */ } });
   let robotUi = $state.raw(null);        // {name, url}: webinterface van de sim-robot of van een robot uit de vloot
   let followId = $state(null);           // robot uit de vloot die de camera en de meters volgen (null = sim-robot)
   let showView = $state(false);          // uitklapper 'weergave' (lagen)
@@ -445,9 +447,12 @@
     </div>
 
     {#if tab}
-      <div class="panel drawer">
+      <div class="panel drawer" class:max={drawerMax}>
         <div class="drawer-head">
           <span>{tabs.find((t) => t[0] === tab)?.[1]}</span>
+          <span class="grow"></span>
+          <button class="ghost" onclick={() => (drawerMax = !drawerMax)} title={drawerMax ? 'Kleiner' : 'Groot scherm'}>
+            <Icon name={drawerMax ? 'shrink' : 'expand'} size={16} /></button>
           <button class="ghost" onclick={() => (tab = '')} title="Sluiten"><Icon name="close" size={16} /></button>
         </div>
         <div class="drawer-body">
@@ -455,7 +460,7 @@
             <FleetPanel fleet={st?.fleet} simRobot={r} {followId} onFollow={follow} onFocus={focusRobot} {toast}
               onOpenUi={(x) => (robotUi = { name: x.name, url: x.url })} />
           {:else if tab === 'missie'}
-            <MissionPanel {scene} bind:selected={selectedField} {startPoints} bind:placingStart onStartPoints={setStarts}
+            <MissionPanel {scene} wide={drawerMax} bind:selected={selectedField} {startPoints} bind:placingStart onStartPoints={setStarts}
               onPlan={(p) => { mission = p; w3d.setMission(p); planVersion = null; if (p?.kind === 'veldmissie') { order = []; w3d.setPlannedPath(null); plannedPath = null; } }}
               onStarted={() => { w3d.clearTrail(); trailXY = []; setCam('volg'); }}
               onFocus={(f) => { w3d.focus(f.center[0], f.center[1], Math.sqrt(f.area_ha * 1e4) * 1.4); mapRef?.fitField(f.id); }} />
@@ -645,7 +650,10 @@
 
   .drawer { top: 118px; left: calc(var(--margin) + 82px); width: 372px; max-height: calc(100% - 118px - 150px); padding: 0;
     display: flex; flex-direction: column; animation: rise 0.18s; }
-  .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 14px;
+  .drawer.max { width: min(1120px, calc(100% - var(--margin) * 2 - 82px)); max-height: calc(100% - 118px - var(--margin));
+    z-index: 15; background: var(--panel-solid); }
+  .drawer-head .grow { flex: 1; }
+  .drawer-head { display: flex; align-items: center; gap: 2px; justify-content: space-between; padding: 8px 8px 8px 14px;
     border-bottom: 1px solid var(--line); font-family: var(--display); font-size: 18px; font-weight: 600;
     letter-spacing: 0.08em; text-transform: uppercase; }
   .drawer-body { padding: 12px 14px 14px; overflow: auto; }

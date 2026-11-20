@@ -31,4 +31,5 @@ worlds/example/backups/
 worlds/example/cache/
 worlds/example/missions/veldmissie_*.json
 !worlds/example/missions/veldmissie_driehoek.json
+worlds/example/missions/wachtrijen.json
 fleet.json
